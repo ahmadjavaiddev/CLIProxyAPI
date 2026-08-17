@@ -45,11 +45,12 @@
       line-height: 1.5;
     }
 
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
     button { touch-action: manipulation; }
 
     button:focus-visible,
     input:focus-visible,
+    select:focus-visible,
     a:focus-visible {
       outline: 3px solid color-mix(in srgb, var(--focus) 30%, transparent);
       outline-offset: 2px;
@@ -137,7 +138,7 @@
 
     .statusbar {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       margin: 24px 0 30px;
       border-block: 1px solid var(--line);
     }
@@ -165,6 +166,49 @@
 
     h2 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
     .hint { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) 190px 190px auto;
+      align-items: end;
+      gap: 10px;
+      margin: 18px 0 12px;
+    }
+    .control label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .search-control { position: relative; }
+    .search-control .icon {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .control input,
+    .control select {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      padding: 8px 11px;
+    }
+    .search-control input { padding-left: 38px; }
+    .control input::placeholder { color: var(--faint); }
+    .result-count {
+      min-width: 94px;
+      padding: 10px 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+      white-space: nowrap;
+    }
 
     .account-list {
       overflow: hidden;
@@ -297,12 +341,17 @@
 
     .notice {
       display: none;
-      margin: 18px 0 0;
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 1000;
+      width: min(420px, calc(100% - 48px));
       border: 1px solid var(--warning-border);
       border-radius: 8px;
       background: var(--warning-soft);
       color: #edc96e;
       padding: 12px 14px;
+      box-shadow: 0 16px 44px rgba(0, 0, 0, .48);
     }
 
     .notice.visible { display: flex; align-items: flex-start; gap: 10px; }
@@ -364,6 +413,10 @@
       .metric { padding: 14px 12px; }
       .metric:first-child { grid-column: 1 / -1; padding-left: 12px; border-bottom: 1px solid var(--line); }
       .metric:nth-child(2) { padding-left: 12px; }
+      .metric:nth-child(2n) { border-right: 0; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .search-control { grid-column: 1 / -1; }
+      .result-count { align-self: center; text-align: left; }
       .account { grid-template-columns: 1fr auto; gap: 13px; }
       .identity { grid-column: 1 / -1; }
       .name-editor { flex-wrap: wrap; }
@@ -371,6 +424,7 @@
       .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
       .row-actions .button { flex: 1; }
       .footer { flex-direction: column; gap: 6px; }
+      .notice { right: 11px; bottom: max(11px, env(safe-area-inset-bottom)); width: calc(100% - 22px); }
     }
   </style>
 </head>
@@ -402,12 +456,24 @@
         <div class="metric-value online"><span class="dot" id="serviceDot"></span><span id="serviceStatus">Checking…</span></div>
       </div>
       <div class="metric">
-        <div class="metric-label">Active accounts</div>
-        <div class="metric-value" id="activeCount">—</div>
-      </div>
-      <div class="metric">
         <div class="metric-label">Total accounts</div>
         <div class="metric-value" id="totalCount">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">In use</div>
+        <div class="metric-value" id="inUseCount">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Not used</div>
+        <div class="metric-value" id="notUsedCount">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Limit hit</div>
+        <div class="metric-value" id="limitHitCount">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Usage unavailable</div>
+        <div class="metric-value" id="usageUnavailableCount">—</div>
       </div>
     </section>
 
@@ -417,6 +483,34 @@
           <h2>Account pool</h2>
           <p class="hint">Higher priority is selected first for new sessions. Accounts on cooldown are skipped automatically.</p>
         </div>
+      </div>
+      <div class="toolbar" aria-label="Account filters">
+        <div class="control search-control">
+          <label for="accountSearch">Search accounts</label>
+          <svg class="icon" aria-hidden="true"><use href="#search"></use></svg>
+          <input id="accountSearch" type="search" placeholder="Search name or email…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="control">
+          <label for="usageFilter">Usage state</label>
+          <select id="usageFilter">
+            <option value="all">All accounts</option>
+            <option value="available">Have usage</option>
+            <option value="in-use">In use</option>
+            <option value="not-used">Not used</option>
+            <option value="limit-hit">Limit hit</option>
+            <option value="unavailable">Usage unavailable</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="accountSort">Sort by</label>
+          <select id="accountSort">
+            <option value="name">Name</option>
+            <option value="priority">Priority: highest first</option>
+            <option value="usage-desc">Usage: highest first</option>
+            <option value="usage-asc">Usage: lowest first</option>
+          </select>
+        </div>
+        <div class="result-count" id="resultCount" aria-live="polite">— accounts</div>
       </div>
       <div class="account-list" id="accountList" aria-live="polite">
         <div class="empty">Loading accounts…</div>
@@ -468,11 +562,22 @@
   <svg class="hidden" aria-hidden="true">
     <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></symbol>
     <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></symbol>
   </svg>
 
   <script>
     const API = "/v0/accounts";
-    const state = { accounts: [], quotas: {}, pendingDelete: null, editingName: null, nameDraft: "" };
+    const state = {
+      accounts: [],
+      quotas: {},
+      pendingDelete: null,
+      editingName: null,
+      nameDraft: "",
+      query: "",
+      usageFilter: "all",
+      sort: "name",
+      refreshing: new Set()
+    };
     const accountList = document.getElementById("accountList");
     const notice = document.getElementById("notice");
 
@@ -545,12 +650,76 @@
       }).join("")}</div>`;
     }
 
+    function accountUsage(account) {
+      const quota = state.quotas[account.name];
+      const windows = quota?.status === "success" ? quota.data.windows || [] : [];
+      if (!windows.length) return null;
+      return Math.max(...windows.map(window => Math.max(0, Math.min(100, Number(window.used_percent || 0)))));
+    }
+
+    function usageState(account) {
+      const usage = accountUsage(account);
+      if (usage === null) {
+        return state.quotas[account.name]?.status === "loading" ? "loading" : "unavailable";
+      }
+      if (usage >= 100) return "limit-hit";
+      if (usage > 0) return "in-use";
+      return "not-used";
+    }
+
+    function accountDisplayName(account) {
+      return String(account.note || account.email || account.label || "Codex account").trim();
+    }
+
+    function visibleAccounts() {
+      const query = state.query.trim().toLocaleLowerCase();
+      const filtered = state.accounts.filter(account => {
+        const searchText = `${account.note || ""} ${account.email || ""} ${account.label || ""}`.toLocaleLowerCase();
+        const matchesSearch = !query || searchText.includes(query);
+        const currentUsageState = usageState(account);
+        const matchesUsage = state.usageFilter === "all"
+          || (state.usageFilter === "available" && accountUsage(account) !== null)
+          || state.usageFilter === currentUsageState;
+        return matchesSearch && matchesUsage;
+      });
+
+      return filtered.sort((left, right) => {
+        if (state.sort === "name") {
+          return accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: "base", numeric: true });
+        }
+        if (state.sort === "priority") {
+          const priorityDifference = (Number(right.priority) || 0) - (Number(left.priority) || 0);
+          return priorityDifference || accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: "base", numeric: true });
+        }
+        const leftUsage = accountUsage(left);
+        const rightUsage = accountUsage(right);
+        if (leftUsage === null && rightUsage === null) return accountDisplayName(left).localeCompare(accountDisplayName(right));
+        if (leftUsage === null) return 1;
+        if (rightUsage === null) return -1;
+        const direction = state.sort === "usage-desc" ? rightUsage - leftUsage : leftUsage - rightUsage;
+        return direction || accountDisplayName(left).localeCompare(accountDisplayName(right));
+      });
+    }
+
+    function renderStats() {
+      const states = state.accounts.map(usageState);
+      document.getElementById("totalCount").textContent = state.accounts.length;
+      document.getElementById("inUseCount").textContent = states.filter(value => value === "in-use").length;
+      document.getElementById("notUsedCount").textContent = states.filter(value => value === "not-used").length;
+      document.getElementById("limitHitCount").textContent = states.filter(value => value === "limit-hit").length;
+      document.getElementById("usageUnavailableCount").textContent = states.filter(value => value === "unavailable").length;
+    }
+
     function renderAccounts() {
-      const accounts = state.accounts;
-      document.getElementById("totalCount").textContent = accounts.length;
-      document.getElementById("activeCount").textContent = accounts.filter(account => !account.disabled && !account.unavailable).length;
-      if (!accounts.length) {
+      const accounts = visibleAccounts();
+      renderStats();
+      document.getElementById("resultCount").textContent = `${accounts.length} of ${state.accounts.length}`;
+      if (!state.accounts.length) {
         accountList.innerHTML = '<div class="empty"><strong>No Codex accounts yet</strong>Use “Add account” to connect your first account.</div>';
+        return;
+      }
+      if (!accounts.length) {
+        accountList.innerHTML = '<div class="empty"><strong>No matching accounts</strong>Try a different search or usage filter.</div>';
         return;
       }
       accountList.innerHTML = accounts.map(account => {
@@ -562,6 +731,7 @@
         const reportedPlan = quota?.status === "success" ? quota.data.plan_type : "";
         const plan = escapeHTML(reportedPlan ? reportedPlan.charAt(0).toUpperCase() + reportedPlan.slice(1) : account.account_type || "ChatGPT");
         const priority = Number.isInteger(account.priority) ? account.priority : 0;
+        const isRefreshing = state.refreshing.has(account.name);
         const isEditingName = state.editingName === account.name;
         const identityMeta = accountName
           ? `${email} · ${plan} · ${escapeHTML(account.status_message || "Ready for requests")}`
@@ -592,6 +762,10 @@
               <button class="button small save-priority" type="button">Save</button>
             </div>
             <div class="row-actions">
+              <button class="button small refresh-account" type="button" ${isRefreshing ? "disabled" : ""} aria-label="Refresh usage for ${email}">
+                <svg class="icon" aria-hidden="true"><use href="#refresh"></use></svg>
+                ${isRefreshing ? "Refreshing…" : "Refresh"}
+              </button>
               <button class="button small toggle-account" type="button">${account.disabled ? "Enable" : "Disable"}</button>
               <button class="button small danger delete-account" type="button">Remove</button>
             </div>
@@ -654,6 +828,19 @@
       state.nameDraft = "";
       showNotice(note ? "Account name saved." : "Account name cleared.", "success");
       await loadAccounts();
+    }
+
+    async function refreshAccount(account) {
+      state.refreshing.add(account.name);
+      renderAccounts();
+      try {
+        const data = await request("/quota?auth_index=" + encodeURIComponent(account.auth_index));
+        state.quotas[account.name] = { status: "success", data };
+        showNotice(`Usage refreshed for ${accountDisplayName(account)}.`, "success");
+      } finally {
+        state.refreshing.delete(account.name);
+        renderAccounts();
+      }
     }
 
     async function toggleAccount(account) {
@@ -727,6 +914,18 @@
       loadAccounts().catch(error => showNotice(error.message, "error"));
     });
     document.getElementById("addButton").addEventListener("click", addAccount);
+    document.getElementById("accountSearch").addEventListener("input", event => {
+      state.query = event.target.value;
+      renderAccounts();
+    });
+    document.getElementById("usageFilter").addEventListener("change", event => {
+      state.usageFilter = event.target.value;
+      renderAccounts();
+    });
+    document.getElementById("accountSort").addEventListener("change", event => {
+      state.sort = event.target.value;
+      renderAccounts();
+    });
 
     accountList.addEventListener("click", async event => {
       const row = event.target.closest(".account");
@@ -747,6 +946,7 @@
           renderAccounts();
           return;
         }
+        if (event.target.closest(".refresh-account")) await refreshAccount(account);
         if (event.target.closest(".save-priority")) await savePriority(account, row);
         if (event.target.closest(".toggle-account")) await toggleAccount(account);
         if (event.target.closest(".delete-account")) {
