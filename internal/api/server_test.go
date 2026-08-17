@@ -1536,6 +1536,63 @@ func TestHomeEnabledHidesManagementEndpointsAndControlPanel(t *testing.T) {
 			t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
 		}
 	})
+
+	t.Run("Codex accounts control panel returns 404", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts.html", nil)
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
+		}
+	})
+}
+
+func TestCodexAccountsControlPanel(t *testing.T) {
+	staticDir := t.TempDir()
+	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
+	const page = "<html><title>Codex accounts</title></html>"
+	if err := os.WriteFile(filepath.Join(staticDir, "accounts.html"), []byte(page), 0o600); err != nil {
+		t.Fatalf("failed to write accounts asset: %v", err)
+	}
+
+	server := newTestServer(t)
+	for _, path := range []string{"/", "/accounts.html"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			server.engine.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+			}
+			if rr.Body.String() != page {
+				t.Fatalf("body = %q, want %q", rr.Body.String(), page)
+			}
+		})
+	}
+}
+
+func TestAccountUIAPIRequiresExplicitLoopbackTrust(t *testing.T) {
+	server := newTestServer(t)
+
+	request := func(remoteAddr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/auth-files", nil)
+		req.RemoteAddr = remoteAddr
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := request("127.0.0.1:40000"); rr.Code != http.StatusNotFound {
+		t.Fatalf("disabled status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
+	}
+
+	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
+	if rr := request("192.0.2.1:40000"); rr.Code != http.StatusForbidden {
+		t.Fatalf("remote status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+	}
+	if rr := request("127.0.0.1:40000"); rr.Code != http.StatusOK {
+		t.Fatalf("loopback status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
 }
 
 func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {

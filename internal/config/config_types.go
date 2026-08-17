@@ -194,6 +194,8 @@ type PprofConfig struct {
 type RemoteManagement struct {
 	// AllowRemote toggles remote (non-localhost) access to management API.
 	AllowRemote bool `yaml:"allow-remote"`
+	// AllowAccountUIWithoutAuth exposes the focused account UI API to loopback callers without a management key.
+	AllowAccountUIWithoutAuth bool `yaml:"allow-account-ui-without-auth"`
 	// SecretKey is the management key (plaintext or bcrypt hashed). YAML key intentionally 'secret-key'.
 	SecretKey string `yaml:"secret-key"`
 	// DisableControlPanel skips serving and syncing the bundled management UI when true.

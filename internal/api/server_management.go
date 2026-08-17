@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -167,6 +169,7 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
+		mgmt.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)
@@ -182,6 +185,29 @@ func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func (s *Server) accountUIAvailabilityMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil || s.cfg == nil || s.cfg.Home.Enabled || !s.cfg.RemoteManagement.AllowAccountUIWithoutAuth {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		if c.Request == nil || !isLoopbackRemoteAddress(c.Request.RemoteAddr) {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		c.Next()
+	}
+}
+
+func isLoopbackRemoteAddress(address string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(address), "[]")
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) managementAvailable(c *gin.Context) bool {
@@ -308,5 +334,27 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		}
 	}
 
+	c.File(filePath)
+}
+
+func (s *Server) serveCodexAccountsControlPanel(c *gin.Context) {
+	cfg := s.cfg
+	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	filePath := filepath.Join(managementasset.StaticDir(s.configFilePath), "accounts.html")
+	if _, err := os.Stat(filePath); err != nil {
+		if !os.IsNotExist(err) {
+			log.WithError(err).Error("failed to stat Codex accounts control panel asset")
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	c.Header("Cache-Control", "no-store")
 	c.File(filePath)
 }

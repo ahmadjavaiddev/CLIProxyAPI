@@ -22,6 +22,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	sdkauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	log "github.com/sirupsen/logrus"
@@ -339,6 +340,52 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
+}
+
+// RequestCodexDeviceToken starts a device-code login that can be approved in
+// any browser without redirecting back to this server.
+func (h *Handler) RequestCodexDeviceToken(c *gin.Context) {
+	ctx := PopulateAuthContext(context.Background(), c)
+	authorization, err := sdkauth.BeginCodexDeviceAuthorization(ctx, h.cfg)
+	if err != nil {
+		log.WithError(err).Error("failed to start Codex device authentication")
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to request Codex device code"})
+		return
+	}
+
+	state, err := misc.GenerateRandomState()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate authentication state"})
+		return
+	}
+	RegisterOAuthSession(state, "codex")
+
+	go func() {
+		record, errComplete := sdkauth.CompleteCodexDeviceAuthorization(ctx, h.cfg, authorization)
+		if errComplete != nil {
+			SetOAuthSessionError(state, oauthSessionErrorWithCause("Codex device authentication failed", errComplete))
+			log.WithError(errComplete).Error("Codex device authentication failed")
+			return
+		}
+		if errGuard := guardOAuthSessionPendingForSave(state, "codex"); errGuard != nil {
+			return
+		}
+		if _, errSave := h.saveTokenRecord(ctx, record); errSave != nil {
+			SetOAuthSessionError(state, "Failed to save authentication tokens")
+			log.WithError(errSave).Error("failed to save Codex device credential")
+			return
+		}
+		CompleteOAuthSession(state)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":     "ok",
+		"flow":       "device",
+		"url":        authorization.VerificationURL,
+		"user_code":  authorization.UserCode,
+		"expires_in": 900,
+		"state":      state,
+	})
 }
 
 func (h *Handler) RequestAntigravityToken(c *gin.Context) {

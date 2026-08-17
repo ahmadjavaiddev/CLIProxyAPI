@@ -52,6 +52,20 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
+	s.engine.GET("/accounts.html", s.serveCodexAccountsControlPanel)
+	accountsUI := s.engine.Group("/v0/accounts")
+	accountsUI.Use(s.accountUIAvailabilityMiddleware())
+	{
+		accountsUI.GET("/auth-files", s.mgmt.ListAuthFiles)
+		accountsUI.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
+		accountsUI.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
+		accountsUI.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
+		accountsUI.GET("/quota", s.mgmt.GetCodexQuota)
+		accountsUI.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
+		accountsUI.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
+		accountsUI.GET("/get-auth-status", s.mgmt.GetAuthStatus)
+		accountsUI.DELETE("/oauth-session", s.mgmt.CancelAuthSession)
+	}
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
@@ -128,16 +142,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Root endpoint
-	s.engine.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "CLI Proxy API Server",
-			"endpoints": []string{
-				"POST /v1/chat/completions",
-				"POST /v1/completions",
-				"GET /v1/models",
-			},
-		})
-	})
+	s.engine.GET("/", s.serveCodexAccountsControlPanel)
 
 	// OAuth callback endpoints (reuse main server port)
 	// These endpoints receive provider redirects and persist

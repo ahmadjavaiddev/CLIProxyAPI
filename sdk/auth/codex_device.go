@@ -54,6 +54,81 @@ type codexDeviceTokenResponse struct {
 	CodeChallenge     string `json:"code_challenge"`
 }
 
+// CodexDeviceAuthorization contains the details needed to approve a Codex
+// login from any browser.
+type CodexDeviceAuthorization struct {
+	DeviceAuthID    string
+	UserCode        string
+	VerificationURL string
+	PollInterval    time.Duration
+}
+
+// BeginCodexDeviceAuthorization requests a one-time Codex device code.
+func BeginCodexDeviceAuthorization(ctx context.Context, cfg *config.Config) (*CodexDeviceAuthorization, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("cliproxy auth: configuration is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	httpClient := util.SetProxy(&cfg.SDKConfig, &http.Client{})
+	response, err := requestCodexDeviceUserCode(ctx, httpClient)
+	if err != nil {
+		return nil, err
+	}
+	userCode := strings.TrimSpace(response.UserCode)
+	if userCode == "" {
+		userCode = strings.TrimSpace(response.UserCodeAlt)
+	}
+	deviceAuthID := strings.TrimSpace(response.DeviceAuthID)
+	if userCode == "" || deviceAuthID == "" {
+		return nil, fmt.Errorf("codex device flow did not return required fields")
+	}
+
+	return &CodexDeviceAuthorization{
+		DeviceAuthID:    deviceAuthID,
+		UserCode:        userCode,
+		VerificationURL: codexDeviceVerificationURL,
+		PollInterval:    parseCodexDevicePollInterval(response.Interval),
+	}, nil
+}
+
+// CompleteCodexDeviceAuthorization waits for browser approval and returns the
+// resulting credential record.
+func CompleteCodexDeviceAuthorization(ctx context.Context, cfg *config.Config, authorization *CodexDeviceAuthorization) (*coreauth.Auth, error) {
+	if cfg == nil || authorization == nil {
+		return nil, fmt.Errorf("cliproxy auth: device authorization is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	httpClient := util.SetProxy(&cfg.SDKConfig, &http.Client{})
+	tokenResponse, err := pollCodexDeviceToken(ctx, httpClient, authorization.DeviceAuthID, authorization.UserCode, authorization.PollInterval)
+	if err != nil {
+		return nil, err
+	}
+	authCode := strings.TrimSpace(tokenResponse.AuthorizationCode)
+	codeVerifier := strings.TrimSpace(tokenResponse.CodeVerifier)
+	codeChallenge := strings.TrimSpace(tokenResponse.CodeChallenge)
+	if authCode == "" || codeVerifier == "" || codeChallenge == "" {
+		return nil, fmt.Errorf("codex device flow token response missing required fields")
+	}
+
+	authService := codex.NewCodexAuth(cfg)
+	authBundle, err := authService.ExchangeCodeForTokensWithRedirect(
+		ctx,
+		authCode,
+		codexDeviceTokenExchangeRedirectURI,
+		&codex.PKCECodes{CodeVerifier: codeVerifier, CodeChallenge: codeChallenge},
+	)
+	if err != nil {
+		return nil, codex.NewAuthenticationError(codex.ErrCodeExchangeFailed, err)
+	}
+	return NewCodexAuthenticator().buildAuthRecord(authService, authBundle)
+}
+
 func shouldUseCodexDeviceFlow(opts *LoginOptions) bool {
 	if opts == nil || opts.Metadata == nil {
 		return false
