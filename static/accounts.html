@@ -244,7 +244,14 @@
       font-weight: 650;
     }
     .name-button:hover { background: var(--surface-muted); color: var(--text); }
-    .meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .meta {
+      overflow: hidden;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .name-editor { display: flex; align-items: center; gap: 7px; }
     .name-editor input {
       width: min(280px, 100%);
@@ -671,6 +678,25 @@
       return String(account.note || account.email || account.label || "Codex account").trim();
     }
 
+    function friendlyStatusMessage(account) {
+      const raw = String(account.status_message || "").trim();
+      if (!raw) return "Ready for requests";
+
+      let type = "";
+      let message = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        const error = parsed?.error || parsed;
+        type = String(error?.type || error?.code || "").trim();
+        message = String(error?.message || error?.error || raw).trim();
+      } catch (_) {}
+
+      if (type === "usage_limit_reached" || raw.includes("usage_limit_reached")) {
+        return "Usage limit reached";
+      }
+      return message.length > 120 ? message.slice(0, 117) + "…" : message;
+    }
+
     function visibleAccounts() {
       const query = state.query.trim().toLocaleLowerCase();
       const filtered = state.accounts.filter(account => {
@@ -733,9 +759,10 @@
         const priority = Number.isInteger(account.priority) ? account.priority : 0;
         const isRefreshing = state.refreshing.has(account.name);
         const isEditingName = state.editingName === account.name;
+        const statusMessage = escapeHTML(friendlyStatusMessage(account));
         const identityMeta = accountName
-          ? `${email} · ${plan} · ${escapeHTML(account.status_message || "Ready for requests")}`
-          : `${plan} · ${escapeHTML(account.status_message || "Ready for requests")}`;
+          ? `${email} · ${plan} · ${statusMessage}`
+          : `${plan} · ${statusMessage}`;
         const identityHead = isEditingName ? `
           <form class="name-editor">
             <input class="name-input" type="text" maxlength="80" value="${escapeHTML(state.nameDraft)}" placeholder="Account name, e.g. Work" autocomplete="off" aria-label="Account name for ${email}">
