@@ -232,6 +232,17 @@
     .identity { min-width: 0; }
     .identity-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .account-name { overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .plan-label {
+      flex: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 1px 7px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
     .name-button {
       flex: none;
       border: 0;
@@ -323,6 +334,7 @@
 
     .badge.disabled { border-color: var(--line); background: var(--surface-muted); color: var(--muted); }
     .badge.error { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+    .badge.warning { border-color: var(--warning-border); background: var(--warning-soft); color: #edc96e; }
 
     .priority-control { display: flex; align-items: center; gap: 7px; }
     .priority-control label { color: var(--muted); font-size: 12px; font-weight: 650; }
@@ -612,7 +624,12 @@
     }
 
     function statusBadge(account) {
+      const quota = state.quotas[account.name];
       if (account.disabled) return '<span class="badge disabled">Disabled</span>';
+      if (quota?.status === "success") {
+        if (quota.data.limit_reached || accountUsage(account) >= 100) return '<span class="badge warning">Limit hit</span>';
+        return '<span class="badge">Active</span>';
+      }
       if (account.failed || account.unavailable || account.status === "error") return '<span class="badge error">Unavailable</span>';
       return '<span class="badge">Active</span>';
     }
@@ -676,6 +693,19 @@
 
     function accountDisplayName(account) {
       return String(account.note || account.email || account.label || "Codex account").trim();
+    }
+
+    function subscriptionStatus(account) {
+      const raw = account.id_token?.chatgpt_subscription_active_until;
+      if (!raw) return "Subscription end unavailable";
+      const end = new Date(raw);
+      if (Number.isNaN(end.getTime())) return "Subscription end unavailable";
+
+      const day = end.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+      const remaining = end.getTime() - Date.now();
+      if (remaining <= 0) return `Subscription ended ${day}`;
+      const days = Math.ceil(remaining / 86400000);
+      return `Subscription ends ${day} · ${days}d left`;
     }
 
     function friendlyStatusMessage(account) {
@@ -755,11 +785,15 @@
         const displayName = escapeHTML(accountName || account.email || account.label || "Codex account");
         const quota = state.quotas[account.name];
         const reportedPlan = quota?.status === "success" ? quota.data.plan_type : "";
-        const plan = escapeHTML(reportedPlan ? reportedPlan.charAt(0).toUpperCase() + reportedPlan.slice(1) : account.account_type || "ChatGPT");
+        const rawPlan = String(reportedPlan || account.id_token?.plan_type || account.account_type || "ChatGPT").trim();
+        const planName = rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1).toLowerCase() : "ChatGPT";
+        const plan = escapeHTML(planName);
+        const planLabel = rawPlan.toLowerCase() === "free" ? '<span class="plan-label">Free</span>' : "";
         const priority = Number.isInteger(account.priority) ? account.priority : 0;
         const isRefreshing = state.refreshing.has(account.name);
         const isEditingName = state.editingName === account.name;
         const statusMessage = escapeHTML(friendlyStatusMessage(account));
+        const subscription = escapeHTML(subscriptionStatus(account));
         const identityMeta = accountName
           ? `${email} · ${plan} · ${statusMessage}`
           : `${plan} · ${statusMessage}`;
@@ -772,6 +806,7 @@
         ` : `
           <div class="identity-head">
             <div class="account-name" title="${displayName}">${displayName}</div>
+            ${planLabel}
             <button class="name-button edit-name" type="button" aria-label="${accountName ? "Rename" : "Name"} ${email}">${accountName ? "Rename" : "Add name"}</button>
           </div>
         `;
@@ -780,6 +815,7 @@
             <div class="identity">
               ${identityHead}
               <div class="meta">${identityMeta}</div>
+              <div class="meta">${subscription}</div>
               ${quotaMarkup(account)}
             </div>
             <div>${statusBadge(account)}</div>
