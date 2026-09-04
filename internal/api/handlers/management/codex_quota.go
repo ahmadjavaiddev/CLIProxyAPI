@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,10 +10,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
-var codexQuotaUsageURL = "https://chatgpt.com/backend-api/wham/usage"
+var (
+	codexQuotaUsageURL        = "https://chatgpt.com/backend-api/wham/usage"
+	codexQuotaResetCreditsURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+	codexQuotaResetConsumeURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+)
 
 type codexQuotaWindow struct {
 	UsedPercent        *float64 `json:"used_percent"`
@@ -29,9 +35,29 @@ type codexQuotaLimit struct {
 }
 
 type codexQuotaUpstreamResponse struct {
-	PlanType            string           `json:"plan_type"`
-	RateLimit           *codexQuotaLimit `json:"rate_limit"`
-	CodeReviewRateLimit *codexQuotaLimit `json:"code_review_rate_limit"`
+	PlanType             string                     `json:"plan_type"`
+	RateLimit            *codexQuotaLimit           `json:"rate_limit"`
+	CodeReviewRateLimit  *codexQuotaLimit           `json:"code_review_rate_limit"`
+	RateLimitResetCredit codexQuotaResetCreditCount `json:"rate_limit_reset_credits"`
+}
+
+type codexQuotaResetCreditCount struct {
+	AvailableCount int `json:"available_count"`
+}
+
+type codexQuotaResetCredit struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type codexQuotaResetCreditsResponse struct {
+	Credits        []codexQuotaResetCredit `json:"credits"`
+	AvailableCount int                     `json:"available_count"`
+}
+
+type codexQuotaResetConsumeResponse struct {
+	Code         string `json:"code"`
+	WindowsReset int    `json:"windows_reset"`
 }
 
 type codexQuotaWindowResponse struct {
@@ -110,8 +136,140 @@ func (h *Handler) GetCodexQuota(c *gin.Context) {
 		"plan_type":     strings.TrimSpace(upstream.PlanType),
 		"allowed":       codexQuotaAllowed(upstream.RateLimit),
 		"limit_reached": upstream.RateLimit != nil && upstream.RateLimit.LimitReached,
+		"reset_credits": max(0, upstream.RateLimitResetCredit.AvailableCount),
 		"windows":       windows,
 	})
+}
+
+// ConsumeCodexQuotaReset redeems one provider-issued Codex rate-limit reset credit.
+func (h *Handler) ConsumeCodexQuotaReset(c *gin.Context) {
+	if h.authManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
+		return
+	}
+
+	var requestBody struct {
+		AuthIndex string `json:"auth_index"`
+	}
+	if errBindJSON := c.ShouldBindJSON(&requestBody); errBindJSON != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	authIndex := strings.TrimSpace(requestBody.AuthIndex)
+	if authIndex == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "auth_index is required"})
+		return
+	}
+	auth := h.authByIndex(authIndex)
+	if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Codex credential not found"})
+		return
+	}
+	token, errToken := h.resolveTokenForAuth(c.Request.Context(), auth, "")
+	if errToken != nil || strings.TrimSpace(token) == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Codex credential token unavailable"})
+		return
+	}
+	accountID := stringValue(auth.Metadata, "account_id")
+
+	creditsRequest, errCreditsRequest := newCodexQuotaRequest(c, http.MethodGet, codexQuotaResetCreditsURL, token, accountID, nil)
+	if errCreditsRequest != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build reset credits request"})
+		return
+	}
+	client := &http.Client{Transport: h.apiCallTransport(auth, "")}
+	creditsResponse, errCredits := client.Do(creditsRequest)
+	if errCredits != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Codex reset credits request failed"})
+		return
+	}
+	defer func() {
+		if errClose := creditsResponse.Body.Close(); errClose != nil {
+			log.WithError(errClose).Error("Codex reset credits response body close failed")
+		}
+	}()
+	if creditsResponse.StatusCode < http.StatusOK || creditsResponse.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(creditsResponse.Body, 1<<20))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Codex reset credits request was rejected", "upstream_status": creditsResponse.StatusCode})
+		return
+	}
+
+	var credits codexQuotaResetCreditsResponse
+	if errDecode := json.NewDecoder(io.LimitReader(creditsResponse.Body, 1<<20)).Decode(&credits); errDecode != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "invalid Codex reset credits response"})
+		return
+	}
+	creditID := ""
+	for _, credit := range credits.Credits {
+		if strings.EqualFold(strings.TrimSpace(credit.Status), "available") && strings.TrimSpace(credit.ID) != "" {
+			creditID = strings.TrimSpace(credit.ID)
+			break
+		}
+	}
+	if credits.AvailableCount <= 0 || creditID == "" {
+		c.JSON(http.StatusConflict, gin.H{"error": "No Codex limit reset is available"})
+		return
+	}
+
+	consumePayload, errMarshal := json.Marshal(gin.H{
+		"credit_id":         creditID,
+		"redeem_request_id": uuid.NewString(),
+	})
+	if errMarshal != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build reset request"})
+		return
+	}
+	consumeRequest, errConsumeRequest := newCodexQuotaRequest(c, http.MethodPost, codexQuotaResetConsumeURL, token, accountID, consumePayload)
+	if errConsumeRequest != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build reset request"})
+		return
+	}
+	consumeResponse, errConsume := client.Do(consumeRequest)
+	if errConsume != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Codex limit reset request failed"})
+		return
+	}
+	defer func() {
+		if errClose := consumeResponse.Body.Close(); errClose != nil {
+			log.WithError(errClose).Error("Codex limit reset response body close failed")
+		}
+	}()
+	if consumeResponse.StatusCode < http.StatusOK || consumeResponse.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(consumeResponse.Body, 1<<20))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Codex limit reset request was rejected", "upstream_status": consumeResponse.StatusCode})
+		return
+	}
+
+	var consumed codexQuotaResetConsumeResponse
+	if errDecode := json.NewDecoder(io.LimitReader(consumeResponse.Body, 1<<20)).Decode(&consumed); errDecode != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "invalid Codex limit reset response"})
+		return
+	}
+	if _, _, errReset := h.authManager.ResetQuota(c.Request.Context(), auth.ID); errReset != nil {
+		log.WithError(errReset).Warn("Codex limit reset succeeded but local quota state could not be cleared")
+	}
+
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"status":            "ok",
+		"code":              strings.TrimSpace(consumed.Code),
+		"windows_reset":     max(0, consumed.WindowsReset),
+		"remaining_credits": max(0, credits.AvailableCount-1),
+	})
+}
+
+func newCodexQuotaRequest(c *gin.Context, method string, url string, token string, accountID string, body []byte) (*http.Request, error) {
+	request, errRequest := http.NewRequestWithContext(c.Request.Context(), method, url, bytes.NewReader(body))
+	if errRequest != nil {
+		return nil, errRequest
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal")
+	if accountID != "" {
+		request.Header.Set("Chatgpt-Account-Id", accountID)
+	}
+	return request, nil
 }
 
 func appendCodexQuotaWindows(out []codexQuotaWindowResponse, idPrefix string, labelPrefix string, limit *codexQuotaLimit) []codexQuotaWindowResponse {

@@ -1595,6 +1595,21 @@ func TestAccountUIAPIRequiresExplicitLoopbackTrust(t *testing.T) {
 	}
 }
 
+func TestAccountUIResetQuotaRoute(t *testing.T) {
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/accounts/reset-quota", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:40000"
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
 func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 	staticDir := t.TempDir()
