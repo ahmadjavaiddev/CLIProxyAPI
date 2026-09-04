@@ -66,6 +66,12 @@ func (s *Server) setupRoutes() {
 		accountsUI.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
 		accountsUI.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 		accountsUI.DELETE("/oauth-session", s.mgmt.CancelAuthSession)
+
+		vaultUI := accountsUI.Group("/vault")
+		{
+			vaultUI.GET("", s.mgmt.GetAccountVaultEntry)
+			vaultUI.PUT("", s.mgmt.PutAccountVaultEntry)
+		}
 	}
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)

@@ -46,6 +46,7 @@ type Handler struct {
 	appliedReloadGeneration uint64
 	attemptsMu              sync.Mutex
 	failedAttempts          map[string]*attemptInfo // keyed by client IP
+	vaultMu                 sync.Mutex
 	authManager             *coreauth.Manager
 	tokenStore              coreauth.Store
 	localPassword           string

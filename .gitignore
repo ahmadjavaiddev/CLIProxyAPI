@@ -5,6 +5,7 @@ cli-proxy-api
 # Configuration
 config.yaml
 .env
+.account-vault.json
 
 # Generated content
 bin/*
