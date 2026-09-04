@@ -61,6 +61,7 @@ func (s *Server) setupRoutes() {
 		accountsUI.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
 		accountsUI.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
 		accountsUI.GET("/quota", s.mgmt.GetCodexQuota)
+		accountsUI.POST("/reset-quota", s.mgmt.ConsumeCodexQuotaReset)
 		accountsUI.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
 		accountsUI.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
 		accountsUI.GET("/get-auth-status", s.mgmt.GetAuthStatus)

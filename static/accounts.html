@@ -446,14 +446,151 @@
       .notice { right: 11px; bottom: max(11px, env(safe-area-inset-bottom)); width: calc(100% - 22px); }
     }
   </style>
+  <style>
+    /* Product polish: keep the existing API-driven page, but give it a clearer dashboard rhythm. */
+    :root {
+      --canvas: #101212;
+      --surface: #171a19;
+      --surface-muted: #1d2120;
+      --surface-hover: #1b1f1e;
+      --text: #f1f3f2;
+      --muted: #a5adaa;
+      --faint: #78817d;
+      --line: #2b302e;
+      --line-strong: #414946;
+      --accent: #78b8a0;
+      --accent-hover: #8ac8af;
+      --accent-soft: #20352d;
+      --on-accent: #0e1713;
+      --shadow: 0 2px 8px rgba(0, 0, 0, .16);
+    }
+    body { background: var(--canvas); }
+    .shell { width: min(1440px, calc(100% - 56px)); padding-top: 32px; }
+    .topbar { align-items: center; justify-content: space-between; padding-bottom: 20px; border-bottom-color: var(--line); }
+    .title-group { display: flex; align-items: center; gap: 12px; }
+    .page-title { margin: 0 auto 0 0; color: var(--text); font-size: 24px; font-weight: 700; letter-spacing: -.025em; }
+    .service-indicator { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .service-indicator .dot.ok { animation: service-pulse 2s ease-out infinite; }
+    @keyframes service-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 5px transparent; } }
+    @media (prefers-reduced-motion: reduce) { .service-indicator .dot.ok { animation: none; } }
+    .eyebrow { display: flex; align-items: center; gap: 8px; letter-spacing: .1em; }
+    .brand-mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; color: var(--on-accent); background: var(--accent); font-size: 13px; letter-spacing: 0; }
+    h1 { font-size: clamp(30px, 3.8vw, 42px); letter-spacing: -.035em; }
+    .header-context { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--faint); font-size: 12px; font-weight: 600; }
+    .context-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+    .context-separator, .footer-separator { color: var(--line-strong); }
+    .actions { align-items: center; }
+    .button { border-radius: 8px; border-color: var(--line-strong); box-shadow: none; transition: background .15s ease, border-color .15s ease; }
+    .button:hover { border-color: var(--accent); transform: none; }
+    .button:active { transform: none; }
+    .button.primary { box-shadow: none; }
+    .statusbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 20px 0 28px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .metric { min-height: 82px; padding: 15px 18px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--surface); box-shadow: none; }
+    .metric:first-child { padding-left: 18px; }
+    .metric-label { text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+    .metric-value { margin-top: 6px; font-size: 22px; }
+    .section-head { margin-bottom: 10px; }
+    h2 { font-size: 21px; letter-spacing: -.025em; }
+    .hint { margin-top: 5px; }
+    .toolbar { grid-template-columns: minmax(320px, 1fr) 190px 190px auto auto; gap: 10px; margin: 20px 0 14px; }
+    .control input, .control select { border-radius: 10px; background: var(--surface); }
+    .control input:focus, .control select:focus, .priority-control input:focus, .name-editor input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(120, 184, 160, .18); outline: none; }
+    .clear-filters { min-height: 42px; padding-inline: 12px; color: var(--muted); font-size: 13px; }
+    .result-count { min-width: 80px; font-size: 12px; }
+    .account-list { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: none; overflow: visible; }
+    .account { grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.65fr) minmax(360px, 1fr); gap: 0; min-height: 156px; padding: 24px 26px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--surface); box-shadow: none; overflow: visible; transition: background .15s ease; }
+    .account:hover { border-color: var(--line); background: var(--surface-hover); transform: none; box-shadow: none; }
+    .account:last-child { border-bottom: 1px solid var(--line); }
+    .account-name { font-size: 16px; }
+    .meta { color: var(--muted); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+    .usage-panel { min-width: 0; align-self: stretch; display: flex; align-items: center; padding: 0 28px; border-left: 1px solid var(--line); }
+    .usage { width: 100%; max-width: none; margin-top: 0; }
+    .usage-track { height: 9px; }
+    .badge { padding: 4px 10px; }
+    .account-controls { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; padding-left: 28px; border-left: 1px solid var(--line); }
+    .control-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .card-actions { display: flex; align-items: center; gap: 8px; }
+    .menu-wrap { position: relative; }
+    .menu-toggle { min-width: 76px; }
+    .action-menu { display: none; position: absolute; top: calc(100% + 7px); right: 0; z-index: 20; min-width: 170px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 10px 24px rgba(0, 0, 0, .32); }
+    .menu-wrap.open .action-menu { display: grid; }
+    .menu-item { width: 100%; border: 0; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; padding: 9px 10px; text-align: left; font-size: 13px; }
+    .menu-item:hover { background: var(--surface-muted); }
+    .menu-item:disabled { cursor: wait; opacity: .58; }
+    .menu-item.danger { color: var(--danger); }
+    .account-status { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+    .priority-control { align-self: auto; padding-top: 0; }
+    .priority-summary { color: var(--muted); font-size: 12px; }
+    .priority-summary strong { margin-left: 5px; color: var(--text); font-size: 14px; }
+    .edit-priority-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .edit-priority-label input { width: 58px; height: 36px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-muted); color: var(--text); padding: 6px 8px; }
+    .row-actions { align-self: auto; justify-content: flex-start; gap: 8px; padding-top: 0; }
+    .empty { border: 0; border-radius: 0; background: var(--surface); padding: 64px 24px; }
+    .empty strong { font-size: 18px; }
+    .empty-add { margin: 20px auto 0; }
+    .notice { border-radius: 12px; }
+    .footer { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .footer-shield { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 4px; border-radius: 4px; color: var(--accent); font-size: 10px; }
+    .footer a { color: var(--accent); font-weight: 650; }
+    dialog { border-radius: 16px; }
+    @media (max-width: 1050px) and (min-width: 781px) {
+      .shell { width: min(100% - 40px, 900px); }
+      .statusbar { grid-template-columns: repeat(4, 1fr); }
+      .toolbar { grid-template-columns: minmax(220px, 1fr) 170px 170px auto; }
+      .result-count { grid-column: 1 / -1; text-align: left; padding: 0; }
+      .account { grid-template-columns: minmax(250px, .9fr) minmax(300px, 1.25fr); gap: 0; }
+      .identity { grid-column: 1 / -1; }
+      .usage-panel { grid-column: 1 / 2; grid-row: 2; padding: 0 22px 0 0; border-left: 0; }
+      .account-controls { grid-column: 2; grid-row: 2; padding-left: 22px; }
+      .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+    }
+    @media (max-width: 780px) {
+      .shell { width: min(100% - 28px, 620px); padding-top: 22px; }
+      .topbar { padding-bottom: 22px; }
+      .header-context { margin-top: 12px; }
+      .actions .button { flex: initial; }
+      .actions .button.primary { flex: 1; }
+      .statusbar { gap: 8px; margin: 20px 0 30px; }
+      .metric { min-height: 82px; padding: 13px 12px; }
+      .metric:first-child { padding-left: 12px; }
+      .metric-value { font-size: 20px; }
+      .statusbar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
+      .metric:first-child { grid-column: auto; padding-left: 12px; border-bottom: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .metric:nth-child(2n) { border-right: 0; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .clear-filters { grid-column: 1; }
+      .result-count { grid-column: 2; align-self: center; padding: 10px 0; }
+      .account { padding: 16px 16px 17px 19px; }
+      .card-actions { width: auto; }
+      .card-actions .refresh-account { flex: none; }
+      .empty { padding: 52px 18px; }
+    }
+    @media (max-width: 900px) {
+      .account { grid-template-columns: 1fr; min-height: 0; gap: 16px; padding: 18px 20px; }
+      .identity, .usage-panel, .account-controls { grid-column: auto; grid-row: auto; }
+      .usage-panel, .account-controls { padding: 0; border: 0; }
+      .usage-panel { border-top: 1px solid var(--line); padding-top: 16px; }
+      .account-controls { gap: 14px; }
+      .priority-control { border-top: 1px solid var(--line); padding-top: 13px; }
+      .card-actions { margin-left: auto; }
+    }
+    @media (max-width: 520px) {
+      .account { padding: 15px 14px 16px 16px; gap: 13px; }
+      .identity-head { align-items: flex-start; }
+      .account-name { max-width: 70vw; }
+      .card-actions .button { padding-inline: 9px; }
+      .menu-toggle { min-width: 0; }
+      .priority-control { flex-wrap: wrap; }
+    }
+  </style>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">CLIProxyAPI</p>
-        <h1>Codex accounts</h1>
-        <p class="lede">Keep your Codex sessions running while the proxy chooses an available account for each request.</p>
+      <div class="title-group">
+        <h1 class="page-title">Provider account pool</h1>
+        <div class="service-indicator"><span class="dot" id="serviceDot"></span><span id="serviceStatus">Checking…</span></div>
       </div>
       <div class="actions">
         <button class="button" id="refreshButton" type="button">
@@ -471,75 +608,30 @@
 
     <section class="statusbar" aria-label="Proxy summary">
       <div class="metric">
-        <div class="metric-label">Proxy service</div>
-        <div class="metric-value online"><span class="dot" id="serviceDot"></span><span id="serviceStatus">Checking…</span></div>
-      </div>
-      <div class="metric">
         <div class="metric-label">Total accounts</div>
         <div class="metric-value" id="totalCount">—</div>
       </div>
       <div class="metric">
-        <div class="metric-label">In use</div>
-        <div class="metric-value" id="inUseCount">—</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Not used</div>
-        <div class="metric-value" id="notUsedCount">—</div>
+        <div class="metric-label">Ready</div>
+        <div class="metric-value" id="readyCount">—</div>
       </div>
       <div class="metric">
         <div class="metric-label">Limit hit</div>
         <div class="metric-value" id="limitHitCount">—</div>
       </div>
       <div class="metric">
-        <div class="metric-label">Usage unavailable</div>
-        <div class="metric-value" id="usageUnavailableCount">—</div>
+        <div class="metric-label">Resets available</div>
+        <div class="metric-value" id="resetAvailableCount">—</div>
       </div>
     </section>
 
     <section>
-      <div class="section-head">
-        <div>
-          <h2>Account pool</h2>
-          <p class="hint">Higher priority is selected first for new sessions. Accounts on cooldown are skipped automatically.</p>
-        </div>
-      </div>
-      <div class="toolbar" aria-label="Account filters">
-        <div class="control search-control">
-          <label for="accountSearch">Search accounts</label>
-          <svg class="icon" aria-hidden="true"><use href="#search"></use></svg>
-          <input id="accountSearch" type="search" placeholder="Search name or email…" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="control">
-          <label for="usageFilter">Usage state</label>
-          <select id="usageFilter">
-            <option value="all">All accounts</option>
-            <option value="available">Have usage</option>
-            <option value="in-use">In use</option>
-            <option value="not-used">Not used</option>
-            <option value="limit-hit">Limit hit</option>
-            <option value="unavailable">Usage unavailable</option>
-          </select>
-        </div>
-        <div class="control">
-          <label for="accountSort">Sort by</label>
-          <select id="accountSort">
-            <option value="name">Name</option>
-            <option value="priority">Priority: highest first</option>
-            <option value="usage-desc">Usage: highest first</option>
-            <option value="usage-asc">Usage: lowest first</option>
-          </select>
-        </div>
-        <div class="result-count" id="resultCount" aria-live="polite">— accounts</div>
-      </div>
+      <div class="section-head"><h2>Accounts</h2></div>
       <div class="account-list" id="accountList" aria-live="polite">
         <div class="empty">Loading accounts…</div>
       </div>
     </section>
 
-    <footer class="footer">
-      <span>Your tokens stay in the local auth directory and are never shown on this page.</span>
-      <span>Access is handled by Cloudflare Zero Trust.</span>
-    </footer>
   </main>
 
   <dialog id="deleteDialog">
@@ -582,6 +674,7 @@
     <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></symbol>
     <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
     <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></symbol>
+    <symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"></circle></symbol>
   </svg>
 
   <script>
@@ -592,10 +685,10 @@
       pendingDelete: null,
       editingName: null,
       nameDraft: "",
-      query: "",
-      usageFilter: "all",
-      sort: "name",
-      refreshing: new Set()
+      priorityDraft: 0,
+      refreshing: new Set(),
+      resetting: new Set(),
+      loading: false
     };
     const accountList = document.getElementById("accountList");
     const notice = document.getElementById("notice");
@@ -632,6 +725,13 @@
       }
       if (account.failed || account.unavailable || account.status === "error") return '<span class="badge error">Unavailable</span>';
       return '<span class="badge">Active</span>';
+    }
+
+    function resetAvailabilityBadge(account) {
+      const quota = state.quotas[account.name];
+      const count = quota?.status === "success" ? Math.max(0, Number(quota.data.reset_credits || 0)) : 0;
+      if (!count) return "";
+      return `<span class="badge warning">${count} reset${count === 1 ? "" : "s"} available</span>`;
     }
 
     function formatResetTime(resetAt) {
@@ -701,11 +801,23 @@
       const end = new Date(raw);
       if (Number.isNaN(end.getTime())) return "Subscription end unavailable";
 
-      const day = end.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+      const exactTime = end.toLocaleString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Asia/Karachi"
+      });
+      const pakistanTime = `${exactTime} PKT`;
       const remaining = end.getTime() - Date.now();
-      if (remaining <= 0) return `Subscription ended ${day}`;
-      const days = Math.ceil(remaining / 86400000);
-      return `Subscription ends ${day} · ${days}d left`;
+      if (remaining <= 0) return `Subscription ended ${pakistanTime}`;
+      const totalMinutes = Math.max(1, Math.floor(remaining / 60000));
+      const days = Math.floor(totalMinutes / 1440);
+      const hours = Math.floor((totalMinutes % 1440) / 60);
+      const minutes = totalMinutes % 60;
+      const timeLeft = days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+      return `Subscription ends ${pakistanTime} · ${timeLeft} left`;
     }
 
     function friendlyStatusMessage(account) {
@@ -727,55 +839,24 @@
       return message.length > 120 ? message.slice(0, 117) + "…" : message;
     }
 
-    function visibleAccounts() {
-      const query = state.query.trim().toLocaleLowerCase();
-      const filtered = state.accounts.filter(account => {
-        const searchText = `${account.note || ""} ${account.email || ""} ${account.label || ""}`.toLocaleLowerCase();
-        const matchesSearch = !query || searchText.includes(query);
-        const currentUsageState = usageState(account);
-        const matchesUsage = state.usageFilter === "all"
-          || (state.usageFilter === "available" && accountUsage(account) !== null)
-          || state.usageFilter === currentUsageState;
-        return matchesSearch && matchesUsage;
-      });
-
-      return filtered.sort((left, right) => {
-        if (state.sort === "name") {
-          return accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: "base", numeric: true });
-        }
-        if (state.sort === "priority") {
-          const priorityDifference = (Number(right.priority) || 0) - (Number(left.priority) || 0);
-          return priorityDifference || accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: "base", numeric: true });
-        }
-        const leftUsage = accountUsage(left);
-        const rightUsage = accountUsage(right);
-        if (leftUsage === null && rightUsage === null) return accountDisplayName(left).localeCompare(accountDisplayName(right));
-        if (leftUsage === null) return 1;
-        if (rightUsage === null) return -1;
-        const direction = state.sort === "usage-desc" ? rightUsage - leftUsage : leftUsage - rightUsage;
-        return direction || accountDisplayName(left).localeCompare(accountDisplayName(right));
-      });
-    }
-
     function renderStats() {
       const states = state.accounts.map(usageState);
       document.getElementById("totalCount").textContent = state.accounts.length;
-      document.getElementById("inUseCount").textContent = states.filter(value => value === "in-use").length;
-      document.getElementById("notUsedCount").textContent = states.filter(value => value === "not-used").length;
+      document.getElementById("readyCount").textContent = state.accounts.filter((account, index) => !account.disabled && states[index] !== "limit-hit" && states[index] !== "unavailable" && states[index] !== "loading").length;
       document.getElementById("limitHitCount").textContent = states.filter(value => value === "limit-hit").length;
-      document.getElementById("usageUnavailableCount").textContent = states.filter(value => value === "unavailable").length;
+      document.getElementById("resetAvailableCount").textContent = state.accounts.reduce((total, account) => {
+        const quota = state.quotas[account.name];
+        return total + (quota?.status === "success" ? Math.max(0, Number(quota.data.reset_credits || 0)) : 0);
+      }, 0);
     }
 
     function renderAccounts() {
-      const accounts = visibleAccounts();
+      const accounts = [...state.accounts].sort((left, right) =>
+        accountDisplayName(left).localeCompare(accountDisplayName(right), undefined, { sensitivity: "base", numeric: true })
+      );
       renderStats();
-      document.getElementById("resultCount").textContent = `${accounts.length} of ${state.accounts.length}`;
       if (!state.accounts.length) {
-        accountList.innerHTML = '<div class="empty"><strong>No Codex accounts yet</strong>Use “Add account” to connect your first account.</div>';
-        return;
-      }
-      if (!accounts.length) {
-        accountList.innerHTML = '<div class="empty"><strong>No matching accounts</strong>Try a different search or usage filter.</div>';
+        accountList.innerHTML = '<div class="empty"><strong>No Codex accounts yet</strong><span>Connect an account to start routing requests through your proxy.</span><button class="button primary empty-add" id="emptyAdd" type="button"><svg class="icon" aria-hidden="true"><use href="#plus"></use></svg>Connect first account</button></div>';
         return;
       }
       accountList.innerHTML = accounts.map(account => {
@@ -784,6 +865,7 @@
         const accountName = String(account.note || "").trim();
         const displayName = escapeHTML(accountName || account.email || account.label || "Codex account");
         const quota = state.quotas[account.name];
+        const resetCredits = quota?.status === "success" ? Math.max(0, Number(quota.data.reset_credits || 0)) : 0;
         const reportedPlan = quota?.status === "success" ? quota.data.plan_type : "";
         const rawPlan = String(reportedPlan || account.id_token?.plan_type || account.account_type || "ChatGPT").trim();
         const planName = rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1).toLowerCase() : "ChatGPT";
@@ -791,15 +873,15 @@
         const planLabel = rawPlan.toLowerCase() === "free" ? '<span class="plan-label">Free</span>' : "";
         const priority = Number.isInteger(account.priority) ? account.priority : 0;
         const isRefreshing = state.refreshing.has(account.name);
+        const isResetting = state.resetting.has(account.name);
         const isEditingName = state.editingName === account.name;
         const statusMessage = escapeHTML(friendlyStatusMessage(account));
         const subscription = escapeHTML(subscriptionStatus(account));
-        const identityMeta = accountName
-          ? `${email} · ${plan} · ${statusMessage}`
-          : `${plan} · ${statusMessage}`;
+        const identityMeta = accountName ? `${email} · ${plan}` : `${plan}`;
         const identityHead = isEditingName ? `
           <form class="name-editor">
             <input class="name-input" type="text" maxlength="80" value="${escapeHTML(state.nameDraft)}" placeholder="Account name, e.g. Work" autocomplete="off" aria-label="Account name for ${email}">
+            <label class="edit-priority-label">Priority <input class="priority-input" type="number" step="1" value="${Number(state.priorityDraft) || 0}" aria-label="Priority for ${email}"></label>
             <button class="button small primary save-name" type="submit">Save</button>
             <button class="button small cancel-name" type="button">Cancel</button>
           </form>
@@ -807,7 +889,6 @@
           <div class="identity-head">
             <div class="account-name" title="${displayName}">${displayName}</div>
             ${planLabel}
-            <button class="name-button edit-name" type="button" aria-label="${accountName ? "Rename" : "Name"} ${email}">${accountName ? "Rename" : "Add name"}</button>
           </div>
         `;
         return `
@@ -816,21 +897,31 @@
               ${identityHead}
               <div class="meta">${identityMeta}</div>
               <div class="meta">${subscription}</div>
-              ${quotaMarkup(account)}
             </div>
-            <div>${statusBadge(account)}</div>
-            <div class="priority-control">
-              <label for="priority-${escapeHTML(account.auth_index)}">Priority</label>
-              <input id="priority-${escapeHTML(account.auth_index)}" type="number" step="1" value="${priority}" aria-label="Priority for ${email}">
-              <button class="button small save-priority" type="button">Save</button>
-            </div>
-            <div class="row-actions">
-              <button class="button small refresh-account" type="button" ${isRefreshing ? "disabled" : ""} aria-label="Refresh usage for ${email}">
-                <svg class="icon" aria-hidden="true"><use href="#refresh"></use></svg>
-                ${isRefreshing ? "Refreshing…" : "Refresh"}
-              </button>
-              <button class="button small toggle-account" type="button">${account.disabled ? "Enable" : "Disable"}</button>
-              <button class="button small danger delete-account" type="button">Remove</button>
+            <div class="usage-panel">${quotaMarkup(account)}</div>
+            <div class="account-controls">
+              <div class="control-top">
+                <div class="account-status">${statusBadge(account)}${resetAvailabilityBadge(account)}</div>
+                <div class="card-actions">
+                  <button class="button small refresh-account" type="button" ${isRefreshing ? "disabled" : ""} aria-label="Refresh usage for ${email}">
+                    <svg class="icon" aria-hidden="true"><use href="#refresh"></use></svg>
+                    ${isRefreshing ? "Refreshing…" : "Refresh"}
+                  </button>
+                  <div class="menu-wrap">
+                    <button class="button small menu-toggle" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${email}">
+                      <svg class="icon" aria-hidden="true"><use href="#more"></use></svg>
+                      More
+                    </button>
+                    <div class="action-menu" role="menu">
+                      <button class="menu-item edit-details" type="button" role="menuitem">Edit details</button>
+                      <button class="menu-item toggle-account" type="button" role="menuitem">${account.disabled ? "Enable account" : "Disable account"}</button>
+                      ${resetCredits > 0 ? `<button class="menu-item reset-limits" type="button" role="menuitem" ${isResetting ? "disabled" : ""}>${isResetting ? "Using reset…" : "Use limit reset"}</button>` : ""}
+                      <button class="menu-item danger delete-account" type="button" role="menuitem">Remove account</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="priority-summary">Priority <strong>${priority}</strong></div>
             </div>
           </article>
         `;
@@ -838,8 +929,11 @@
     }
 
     async function loadAccounts() {
+      if (state.loading) return;
+      state.loading = true;
       const refreshButton = document.getElementById("refreshButton");
       refreshButton.disabled = true;
+      refreshButton.setAttribute("aria-busy", "true");
       try {
         const [authData, healthResponse] = await Promise.all([
           request("/auth-files"),
@@ -862,6 +956,8 @@
         }));
       } finally {
         refreshButton.disabled = false;
+        refreshButton.removeAttribute("aria-busy");
+        state.loading = false;
       }
     }
 
@@ -883,13 +979,16 @@
 
     async function saveAccountName(account) {
       const note = state.nameDraft.trim();
+      const priority = Number(state.priorityDraft);
+      if (!Number.isInteger(priority)) throw new Error("Priority must be a whole number.");
       await request("/auth-files/fields", {
         method: "PATCH",
-        body: JSON.stringify({ name: account.name, note })
+        body: JSON.stringify({ name: account.name, note, priority })
       });
       state.editingName = null;
       state.nameDraft = "";
-      showNotice(note ? "Account name saved." : "Account name cleared.", "success");
+      state.priorityDraft = 0;
+      showNotice("Account details saved.", "success");
       await loadAccounts();
     }
 
@@ -902,6 +1001,27 @@
         showNotice(`Usage refreshed for ${accountDisplayName(account)}.`, "success");
       } finally {
         state.refreshing.delete(account.name);
+        renderAccounts();
+      }
+    }
+
+    async function resetAccountLimits(account) {
+      const quota = state.quotas[account.name];
+      const credits = quota?.status === "success" ? Math.max(0, Number(quota.data.reset_credits || 0)) : 0;
+      if (!credits) return;
+      const confirmed = window.confirm(`Use one of ${credits} available limit reset${credits === 1 ? "" : "s"} for ${accountDisplayName(account)}? This cannot be undone.`);
+      if (!confirmed) return;
+      state.resetting.add(account.name);
+      renderAccounts();
+      try {
+        await request("/reset-quota", {
+          method: "POST",
+          body: JSON.stringify({ auth_index: account.auth_index })
+        });
+        showNotice(`Limit reset used for ${accountDisplayName(account)}.`, "success");
+        await loadAccounts();
+      } finally {
+        state.resetting.delete(account.name);
         renderAccounts();
       }
     }
@@ -957,7 +1077,18 @@
       const copyButton = event.target.closest(".copy-device");
       if (!copyButton) return;
       const value = document.getElementById(copyButton.dataset.copy).textContent;
-      await navigator.clipboard.writeText(value);
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch (_) {
+        const helper = document.createElement("textarea");
+        helper.value = value;
+        helper.style.position = "fixed";
+        helper.style.opacity = "0";
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand("copy");
+        helper.remove();
+      }
       const previous = copyButton.textContent;
       copyButton.textContent = "Copied";
       window.setTimeout(() => copyButton.textContent = previous, 1200);
@@ -977,28 +1108,40 @@
       loadAccounts().catch(error => showNotice(error.message, "error"));
     });
     document.getElementById("addButton").addEventListener("click", addAccount);
-    document.getElementById("accountSearch").addEventListener("input", event => {
-      state.query = event.target.value;
-      renderAccounts();
-    });
-    document.getElementById("usageFilter").addEventListener("change", event => {
-      state.usageFilter = event.target.value;
-      renderAccounts();
-    });
-    document.getElementById("accountSort").addEventListener("change", event => {
-      state.sort = event.target.value;
-      renderAccounts();
-    });
+
+    window.setInterval(() => {
+      if (document.visibilityState === "visible" && !document.querySelector("dialog[open]")) {
+        loadAccounts().catch(() => {});
+      }
+    }, 60000);
 
     accountList.addEventListener("click", async event => {
+      if (event.target.closest("#emptyAdd")) {
+        await addAccount();
+        return;
+      }
       const row = event.target.closest(".account");
       if (!row) return;
       const account = state.accounts.find(item => item.name === row.dataset.name);
       if (!account) return;
       try {
-        if (event.target.closest(".edit-name")) {
+        const menuToggle = event.target.closest(".menu-toggle");
+        if (menuToggle) {
+          const menu = menuToggle.closest(".menu-wrap");
+          document.querySelectorAll(".menu-wrap.open").forEach(item => {
+            if (item !== menu) {
+              item.classList.remove("open");
+              item.querySelector(".menu-toggle")?.setAttribute("aria-expanded", "false");
+            }
+          });
+          const open = menu.classList.toggle("open");
+          menuToggle.setAttribute("aria-expanded", String(open));
+          return;
+        }
+        if (event.target.closest(".edit-details") || event.target.closest(".edit-name")) {
           state.editingName = account.name;
           state.nameDraft = String(account.note || "");
+          state.priorityDraft = Number.isInteger(account.priority) ? account.priority : 0;
           renderAccounts();
           accountList.querySelector(`[data-name="${CSS.escape(account.name)}"] .name-input`)?.focus();
           return;
@@ -1010,7 +1153,7 @@
           return;
         }
         if (event.target.closest(".refresh-account")) await refreshAccount(account);
-        if (event.target.closest(".save-priority")) await savePriority(account, row);
+        if (event.target.closest(".reset-limits")) await resetAccountLimits(account);
         if (event.target.closest(".toggle-account")) await toggleAccount(account);
         if (event.target.closest(".delete-account")) {
           state.pendingDelete = account;
@@ -1023,8 +1166,17 @@
       }
     });
 
+    document.addEventListener("click", event => {
+      if (event.target.closest(".menu-wrap")) return;
+      document.querySelectorAll(".menu-wrap.open").forEach(menu => {
+        menu.classList.remove("open");
+        menu.querySelector(".menu-toggle")?.setAttribute("aria-expanded", "false");
+      });
+    });
+
     accountList.addEventListener("input", event => {
       if (event.target.matches(".name-input")) state.nameDraft = event.target.value;
+      if (event.target.matches(".priority-input")) state.priorityDraft = event.target.value;
     });
 
     accountList.addEventListener("submit", async event => {
