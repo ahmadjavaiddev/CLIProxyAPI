@@ -1610,6 +1610,23 @@ func TestAccountUIResetQuotaRoute(t *testing.T) {
 	}
 }
 
+func TestAccountVaultRouteUsesAccountUIAccess(t *testing.T) {
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
+
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/vault", nil)
+		req.RemoteAddr = "127.0.0.1:40000"
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := request(); rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
 func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 	staticDir := t.TempDir()

@@ -421,6 +421,25 @@
     .device-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 22px; font-weight: 700; letter-spacing: .08em; }
     .device-status { min-height: 24px; margin-top: 16px; color: var(--muted); font-size: 13px; }
 
+    dialog.vault-dialog { width: min(620px, calc(100% - 32px)); }
+    .vault-heading p { margin-bottom: 0; }
+    .vault-grid { display: grid; gap: 16px; margin-top: 20px; }
+    .vault-field { min-width: 0; }
+    .vault-field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .vault-field input {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: var(--surface-muted);
+      color: var(--text);
+      padding: 9px 10px;
+    }
+    .vault-field input { height: 40px; }
+    .vault-status { min-height: 18px; margin-top: 10px; color: var(--faint); font-size: 11px; }
+    .vault-status.error { color: var(--danger); }
+    .vault-footer { display: flex; justify-content: flex-end; margin-top: 22px; }
+    .vault-footer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
     .hidden { display: none !important; }
 
     @media (max-width: 780px) {
@@ -444,6 +463,9 @@
       .row-actions .button { flex: 1; }
       .footer { flex-direction: column; gap: 6px; }
       .notice { right: 11px; bottom: max(11px, env(safe-area-inset-bottom)); width: calc(100% - 22px); }
+      .vault-footer { align-items: stretch; flex-direction: column; }
+      .vault-footer-actions { justify-content: stretch; }
+      .vault-footer-actions .button { flex: 1; }
     }
   </style>
   <style>
@@ -670,6 +692,38 @@
     </div>
   </dialog>
 
+  <dialog class="vault-dialog" id="vaultDialog">
+    <form class="dialog-body" id="vaultForm">
+      <div class="vault-heading">
+        <div>
+          <h2>Account credentials</h2>
+          <p id="vaultAccountName">Account</p>
+        </div>
+      </div>
+      <div class="vault-grid">
+        <div class="vault-field">
+          <label for="vaultEmail">Login email</label>
+          <input id="vaultEmail" type="email" maxlength="320" autocomplete="off">
+        </div>
+        <div class="vault-field full">
+          <label for="vaultPassword">Password</label>
+          <input id="vaultPassword" type="text" maxlength="4096" autocomplete="off">
+        </div>
+        <div class="vault-field full">
+          <label for="vaultTOTPSecret">2FA string</label>
+          <input id="vaultTOTPSecret" type="text" maxlength="4096" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="vault-status" id="vaultStatus" role="status" aria-live="polite"></div>
+      <div class="vault-footer">
+        <div class="vault-footer-actions">
+          <button class="button" id="closeVault" type="button">Close</button>
+          <button class="button primary" id="saveVault" type="submit">Save credentials</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <svg class="hidden" aria-hidden="true">
     <symbol id="refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></symbol>
     <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
@@ -688,6 +742,7 @@
       priorityDraft: 0,
       refreshing: new Set(),
       resetting: new Set(),
+      vaultAccount: null,
       loading: false
     };
     const accountList = document.getElementById("accountList");
@@ -705,8 +760,16 @@
       const response = await fetch(API + path, { ...options, headers });
       let body = {};
       try { body = await response.json(); } catch (_) {}
-      if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+      if (!response.ok) {
+        const error = new Error(body.error || `Request failed (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
       return body;
+    }
+
+    async function vaultRequest(path, options = {}) {
+      return request("/vault" + path, options);
     }
 
     function showNotice(message, type = "") {
@@ -913,6 +976,7 @@
                       More
                     </button>
                     <div class="action-menu" role="menu">
+                      <button class="menu-item manage-credentials" type="button" role="menuitem">Manage credentials</button>
                       <button class="menu-item edit-details" type="button" role="menuitem">Edit details</button>
                       <button class="menu-item toggle-account" type="button" role="menuitem">${account.disabled ? "Enable account" : "Disable account"}</button>
                       ${resetCredits > 0 ? `<button class="menu-item reset-limits" type="button" role="menuitem" ${isResetting ? "disabled" : ""}>${isResetting ? "Using reset…" : "Use limit reset"}</button>` : ""}
@@ -1023,6 +1087,64 @@
       } finally {
         state.resetting.delete(account.name);
         renderAccounts();
+      }
+    }
+
+    function scrubVaultSecrets() {
+      for (const id of ["vaultPassword", "vaultTOTPSecret"]) {
+        const element = document.getElementById(id);
+        if (!element) continue;
+        element.value = "";
+      }
+    }
+
+    function closeCredentialVault() {
+      scrubVaultSecrets();
+      state.vaultAccount = null;
+      const dialog = document.getElementById("vaultDialog");
+      if (dialog.open) dialog.close();
+    }
+
+    function setVaultStatus(message, type = "") {
+      const status = document.getElementById("vaultStatus");
+      status.textContent = message;
+      status.className = "vault-status" + (type ? " " + type : "");
+    }
+
+    async function openCredentialVault(account) {
+      await loadCredentialVault(account);
+    }
+
+    async function loadCredentialVault(account) {
+      const metadata = await vaultRequest("?auth_index=" + encodeURIComponent(account.auth_index));
+      state.vaultAccount = account;
+      scrubVaultSecrets();
+      document.getElementById("vaultAccountName").textContent = accountDisplayName(account);
+      document.getElementById("vaultEmail").value = metadata.email || account.email || "";
+      document.getElementById("vaultPassword").value = metadata.password || "";
+      document.getElementById("vaultTOTPSecret").value = metadata.totp_secret || "";
+      setVaultStatus(metadata.exists ? "Credentials are saved locally." : "No credentials saved yet.");
+      const dialog = document.getElementById("vaultDialog");
+      if (!dialog.open) dialog.showModal();
+    }
+
+    async function saveCredentialVault() {
+      if (!state.vaultAccount) return;
+      const payload = {
+        auth_index: state.vaultAccount.auth_index,
+        email: document.getElementById("vaultEmail").value,
+        password: document.getElementById("vaultPassword").value,
+        totp_secret: document.getElementById("vaultTOTPSecret").value
+      };
+      const saveButton = document.getElementById("saveVault");
+      saveButton.disabled = true;
+      setVaultStatus("Saving credentials…");
+      try {
+        await vaultRequest("", { method: "PUT", body: JSON.stringify(payload) });
+        showNotice(`Credentials saved for ${accountDisplayName(state.vaultAccount)}.`, "success");
+        await loadCredentialVault(state.vaultAccount);
+      } finally {
+        saveButton.disabled = false;
       }
     }
 
@@ -1138,6 +1260,10 @@
           menuToggle.setAttribute("aria-expanded", String(open));
           return;
         }
+        if (event.target.closest(".manage-credentials")) {
+          await openCredentialVault(account);
+          return;
+        }
         if (event.target.closest(".edit-details") || event.target.closest(".edit-name")) {
           state.editingName = account.name;
           state.nameDraft = String(account.note || "");
@@ -1200,6 +1326,19 @@
       state.pendingDelete = null;
       try { await deleteAccount(account); }
       catch (error) { showNotice(error.message, "error"); }
+    });
+
+    document.getElementById("vaultForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      try { await saveCredentialVault(); }
+      catch (error) { setVaultStatus(error.message, "error"); }
+    });
+
+    document.getElementById("closeVault").addEventListener("click", closeCredentialVault);
+
+    document.getElementById("vaultDialog").addEventListener("cancel", event => {
+      event.preventDefault();
+      closeCredentialVault();
     });
 
     loadAccounts().catch(error => showNotice(error.message, "error"));
