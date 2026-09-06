@@ -2,8 +2,15 @@ package registry
 
 import "testing"
 
+func TestGetStaticModelDefinitionsByChannelSupportsGeminiInteractions(t *testing.T) {
+	models := GetStaticModelDefinitionsByChannel("gemini-interactions")
+	if len(models) == 0 {
+		t.Fatal("GetStaticModelDefinitionsByChannel(gemini-interactions) returned no models")
+	}
+}
+
 func TestModelOverrideHeadersFromEmbeddedModels(t *testing.T) {
-	const wantUA = "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)"
+	const wantUA = "codex-tui/0.153.3 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.153.3)"
 	got := ModelOverrideHeaders("gpt-5.6-luna")
 	if got == nil {
 		t.Fatal("ModelOverrideHeaders(gpt-5.6-luna) = nil, want headers")

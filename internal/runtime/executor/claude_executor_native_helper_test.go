@@ -28,7 +28,7 @@ func claudeNativeHelperHeaders(betas, compression string, structured bool) http.
 		"Accept":            {"application/json"},
 		"Accept-Encoding":   {compression},
 		"Content-Type":      {"application/json"},
-		"User-Agent":        {"claude-cli/2.1.220 (external, cli)"},
+		"User-Agent":        {"claude-cli/2.1.258 (external, cli)"},
 		"X-App":             {"cli"},
 		"Anthropic-Beta":    {betas},
 		"Anthropic-Version": {"2023-06-01"},
@@ -37,7 +37,7 @@ func claudeNativeHelperHeaders(betas, compression string, structured bool) http.
 		"X-Client-Request-Id":                       {"66666666-7777-4888-8999-aaaaaaaaaaaa"},
 		"X-Stainless-Lang":                          {"js"},
 		"X-Stainless-Runtime":                       {"node"},
-		"X-Stainless-Package-Version":               {"0.94.0"},
+		"X-Stainless-Package-Version":               {"0.112.1"},
 		"X-Stainless-Runtime-Version":               {"v26.3.0"},
 		"X-Stainless-OS":                            {"MacOS"},
 		"X-Stainless-Arch":                          {"arm64"},
@@ -67,14 +67,16 @@ func claudeNativeHelperOAuthAuth(baseURL string) *cliproxyauth.Auth {
 	}
 }
 
-func TestApplyClaudeHeadersPreservesAsyncOnlyForConfirmedNative(t *testing.T) {
+func TestApplyClaudeHeadersPreservesCallerAsyncWithoutFingerprintOptIn(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		confirmed bool
+		profile   bool
 		wantAsync string
 	}{
 		{name: "confirmed native", confirmed: true, wantAsync: "async"},
-		{name: "unconfirmed caller", confirmed: false},
+		{name: "unconfirmed caller default", wantAsync: "async"},
+		{name: "unconfirmed caller profile", profile: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, errRequest := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true", nil)
@@ -83,6 +85,9 @@ func TestApplyClaudeHeadersPreservesAsyncOnlyForConfirmedNative(t *testing.T) {
 			}
 			incoming := http.Header{"X-Stainless-Async": {"async"}}
 			auth := &cliproxyauth.Auth{Attributes: map[string]string{"api_key": "test-api-key"}}
+			if test.profile {
+				auth.Attributes["fingerprint_profile"] = "claude-code-cli"
+			}
 			if errHeaders := applyClaudeHeaders(
 				request,
 				auth,
@@ -159,7 +164,7 @@ func TestClaudeExecutorStructuredNativeHelperPreservesStreamProfile(t *testing.T
 	defer server.Close()
 
 	betas := claudeNativeHelperCoreBetas + ",structured-outputs-2025-12-15"
-	payload := []byte(`{"model":"claude-haiku-4-5-20251001","messages":[{"role":"user","content":[{"type":"text","text":"helper probe"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.220; cc_entrypoint=cli; cch=00000;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."},{"type":"text","text":"Return a short title."}],"tools":[],"metadata":{"user_id":"` + strings.ReplaceAll(claudeNativeHelperUserID, `"`, `\"`) + `"},"max_tokens":32000,"thinking":{"type":"disabled"},"temperature":1,"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}}},"stream":true}`)
+	payload := []byte(`{"model":"claude-haiku-4-5-20251001","messages":[{"role":"user","content":[{"type":"text","text":"helper probe"}]}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.258; cc_entrypoint=cli; cch=00000;"},{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."},{"type":"text","text":"Return a short title."}],"tools":[],"metadata":{"user_id":"` + strings.ReplaceAll(claudeNativeHelperUserID, `"`, `\"`) + `"},"max_tokens":32000,"thinking":{"type":"disabled"},"temperature":1,"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}}},"stream":true}`)
 	headers := claudeNativeHelperHeaders(betas, "gzip, deflate, br, zstd", true)
 	executor := NewClaudeExecutor(&config.Config{})
 	result, errStream := executor.ExecuteStream(context.Background(), claudeNativeHelperOAuthAuth(server.URL), cliproxyexecutor.Request{
@@ -264,7 +269,7 @@ func TestClaudeBodyNeedsBillingFallbackTracksSystemPresence(t *testing.T) {
 		},
 		{
 			name: "structured helper carries its own billing header",
-			body: `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.220; cc_entrypoint=cli; cch=00000;"}]}`,
+			body: `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.258; cc_entrypoint=cli; cch=00000;"}]}`,
 			want: true,
 		},
 		{
