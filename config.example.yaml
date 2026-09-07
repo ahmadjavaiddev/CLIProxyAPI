@@ -21,6 +21,15 @@ remote-management:
   # Use this only when a trusted local reverse proxy (for example, Cloudflare Access) protects the UI.
   allow-account-ui-without-auth: false
 
+  # IPs or CIDRs of edge reverse proxies (Caddy/Nginx in front of this server) whose
+  # connections are treated like loopback for the loopback-only gates (account UI API,
+  # management allow-remote gate). The management secret key is still always required.
+  # Leave empty unless the server port is reachable ONLY through those proxies;
+  # never publish the server port directly to the internet while entries are set.
+  # trusted-proxies:
+  #   - "172.18.0.0/16"
+  #   - "10.0.0.0/8"
+
   # Management key. If a plaintext value is provided here, it will be hashed on startup.
   # All management requests (even from localhost) require this key.
   # Leave empty to disable the Management API entirely (404 for all /v0/management routes).

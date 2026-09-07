@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -201,21 +200,15 @@ func (s *Server) accountUIAvailabilityMiddleware() gin.HandlerFunc {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		if c.Request == nil || !isLoopbackRemoteAddress(c.Request.RemoteAddr) {
+		// The account UI API carries no key, so it only accepts loopback callers
+		// or callers arriving through a configured trusted edge proxy. The edge
+		// proxy (for example, Cloudflare Access) remains the authentication boundary.
+		if c.Request == nil || !s.cfg.RemoteManagement.EdgePeerAllowed(c.Request.RemoteAddr) {
 			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		c.Next()
 	}
-}
-
-func isLoopbackRemoteAddress(address string) bool {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
-	if err != nil {
-		host = strings.Trim(strings.TrimSpace(address), "[]")
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) managementAvailable(c *gin.Context) bool {

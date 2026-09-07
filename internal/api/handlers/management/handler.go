@@ -271,7 +271,13 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		c.Header("X-CPA-SUPPORT-PLUGIN", pluginhost.SupportPluginHeaderValue())
 
 		clientIP := c.ClientIP()
+		// Gate remote access on the TCP peer, not on headers: callers through a
+		// configured trusted edge proxy count as local, everyone else needs
+		// allow-remote. The management secret key is always required.
 		localClient := clientIP == "127.0.0.1" || clientIP == "::1"
+		if h.cfg != nil && c.Request != nil {
+			localClient = h.cfg.RemoteManagement.EdgePeerAllowed(c.Request.RemoteAddr)
+		}
 
 		// Accept either Authorization: Bearer <key> or X-Management-Key
 		var provided string

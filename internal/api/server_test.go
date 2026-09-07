@@ -1771,6 +1771,38 @@ func TestAccountUIAPIRequiresExplicitLoopbackTrust(t *testing.T) {
 	}
 }
 
+func TestAccountUIAPITrustsConfiguredEdgeProxy(t *testing.T) {
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
+	server.cfg.RemoteManagement.TrustedProxies = []string{"172.18.0.0/16", "10.9.0.5", "not-a-cidr"}
+
+	request := func(remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/auth-files", nil)
+		req.RemoteAddr = remoteAddr
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		return rr
+	}
+
+	if rr := request("172.18.0.4:40000", nil); rr.Code != http.StatusOK {
+		t.Fatalf("edge proxy status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if rr := request("10.9.0.5:40000", nil); rr.Code != http.StatusOK {
+		t.Fatalf("edge proxy IP status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if rr := request("203.0.113.7:40000", nil); rr.Code != http.StatusForbidden {
+		t.Fatalf("untrusted status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+	}
+	// Forwarded headers from an untrusted peer must not grant access.
+	spoofed := map[string]string{"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
+	if rr := request("203.0.113.7:40000", spoofed); rr.Code != http.StatusForbidden {
+		t.Fatalf("spoofed header status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
+	}
+}
+
 func TestAccountUIResetQuotaRoute(t *testing.T) {
 	server := newTestServer(t)
 	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
