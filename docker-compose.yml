@@ -1,8 +1,11 @@
 # Single-file setup: only the project image. Credentials live in Supabase
 # Postgres, routing/TLS is handled by the global Caddy on this server.
 #
-#   Machine harnesses (codex/claude): https://ai.tunly.cloud/v1  (Bearer api-key)
-#   Account UI:                        https://accounts.tunly.cloud/ (Cloudflare Access)
+#   One domain does everything: https://ai.tunly.cloud
+#     Machines use https://ai.tunly.cloud/v1      (Bearer api-key)
+#     Humans use   https://ai.tunly.cloud/         (Cloudflare Access login)
+#   Zero Trust splits them by path: Bypass app for /v1/*, /backend-api/*,
+#   /v1beta/*, /openai/*, /healthz -- Require-login app for /*.
 #
 # Usage on any machine:
 #   1. Global Caddy must exist with an external `web` network

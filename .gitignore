@@ -24,6 +24,7 @@ objectstore/*
 # Static assets
 static/*
 !static/accounts.html
+!static/*.go
 
 # Authentication data
 auths/*

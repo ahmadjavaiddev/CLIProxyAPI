@@ -1803,6 +1803,26 @@ func TestAccountUIAPITrustsConfiguredEdgeProxy(t *testing.T) {
 	}
 }
 
+func TestRootServesEmbeddedAccountsPanel(t *testing.T) {
+	server := newTestServer(t)
+
+	for _, path := range []string{"/", "/accounts.html"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want %d body=%s", path, rr.Code, http.StatusOK, rr.Body.String())
+		}
+		if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+			t.Fatalf("GET %s content-type = %q, want text/html", path, contentType)
+		}
+		if body := strings.ToLower(rr.Body.String()); !strings.Contains(body, "<!doctype html>") {
+			t.Fatalf("GET %s body does not look like the accounts panel", path)
+		}
+	}
+}
+
 func TestAccountUIResetQuotaRoute(t *testing.T) {
 	server := newTestServer(t)
 	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true

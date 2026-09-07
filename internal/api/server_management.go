@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
+	forkstatic "github.com/router-for-me/CLIProxyAPI/v7/static"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -352,7 +353,15 @@ func (s *Server) serveCodexAccountsControlPanel(c *gin.Context) {
 			c.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
-		c.AbortWithStatus(http.StatusNotFound)
+		// Docker images and other installs may not ship static/accounts.html
+		// on disk; fall back to the copy embedded in the binary so the panel
+		// (and GET /) works everywhere without extra volumes.
+		if len(forkstatic.AccountsHTML) == 0 {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", forkstatic.AccountsHTML)
 		return
 	}
 
