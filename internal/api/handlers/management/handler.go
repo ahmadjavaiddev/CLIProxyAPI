@@ -49,6 +49,7 @@ type Handler struct {
 	vaultMu                 sync.Mutex
 	authManager             *coreauth.Manager
 	tokenStore              coreauth.Store
+	vaultStore              accountVaultBackend
 	localPassword           string
 	allowRemoteOverride     bool
 	envSecret               string
