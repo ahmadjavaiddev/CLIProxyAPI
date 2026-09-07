@@ -356,11 +356,10 @@ func (a *Auth) indexSeed() string {
 	}
 
 	if filePath != "" && strings.HasSuffix(strings.ToLower(filePath), ".json") {
-		abs, errAbs := filepath.Abs(filePath)
-		if errAbs == nil && strings.TrimSpace(abs) != "" {
-			filePath = abs
-		}
-		filePath = filepath.Clean(filePath)
+		// Seed on the file name only, not the absolute path, so the index
+		// stays stable when the auth directory moves (docker volumes, new
+		// machines). The directory prefix carries no credential identity.
+		filePath = filepath.Base(filepath.Clean(filePath))
 
 		authType := ""
 		if a.Metadata != nil {

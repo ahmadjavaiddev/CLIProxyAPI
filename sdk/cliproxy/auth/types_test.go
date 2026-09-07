@@ -3,8 +3,6 @@ package auth
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -152,35 +150,35 @@ func TestEnsureIndexUsesCredentialIdentity(t *testing.T) {
 	}
 }
 
-func TestEnsureIndexUsesOAuthTypeAndAbsolutePath(t *testing.T) {
+func TestEnsureIndexUsesOAuthTypeAndFileName(t *testing.T) {
 	t.Parallel()
 
-	wd, errWd := os.Getwd()
-	if errWd != nil {
-		t.Fatalf("os.Getwd returned error: %v", errWd)
-	}
-
-	relPath := "test-oauth.json"
-	absPath := filepath.Join(wd, relPath)
-	expectedSeed := "antigravity:" + filepath.Clean(absPath)
+	expectedSeed := "antigravity:test-oauth.json"
 	expectedIndex := stableAuthIndex(expectedSeed)
 
-	a := &Auth{
-		Provider: "antigravity",
-		Attributes: map[string]string{
-			"path": relPath,
-		},
-		Metadata: map[string]any{
-			"type": "antigravity",
-		},
+	newOAuthAuth := func(path string) *Auth {
+		return &Auth{
+			Provider: "antigravity",
+			Attributes: map[string]string{
+				"path": path,
+			},
+			Metadata: map[string]any{
+				"type": "antigravity",
+			},
+		}
 	}
 
-	got := a.EnsureIndex()
+	got := newOAuthAuth("/some/volatile/dir/test-oauth.json").EnsureIndex()
 	if got == "" {
 		t.Fatal("auth index should not be empty")
 	}
 	if got != expectedIndex {
 		t.Fatalf("auth index = %q, want %q", got, expectedIndex)
+	}
+	// The same file name under another directory must produce the same index
+	// so vault entries survive auth directory moves.
+	if other := newOAuthAuth("./other-dir/test-oauth.json").EnsureIndex(); other != got {
+		t.Fatalf("moved auth index = %q, want %q", other, got)
 	}
 }
 
