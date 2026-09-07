@@ -26,7 +26,6 @@ const (
 	defaultCooldownTable = "cooldown_store"
 	defaultVaultTable    = "account_vault_store"
 	defaultConfigKey     = "config"
-	defaultVaultKey      = "vault"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -609,27 +608,42 @@ func (s *PostgresStore) deleteConfigRecord(ctx context.Context) error {
 	return nil
 }
 
-// LoadAccountVault returns the raw account vault document, or nil when absent.
-func (s *PostgresStore) LoadAccountVault(ctx context.Context) ([]byte, error) {
+// LoadAccountVaultRows returns every account vault row keyed by id
+// (one row per account). Callers interpret the per-row JSON documents.
+func (s *PostgresStore) LoadAccountVaultRows(ctx context.Context) (map[string][]byte, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("postgres store: not initialized")
 	}
-	query := fmt.Sprintf("SELECT content FROM %s WHERE id = $1", s.fullTableName(s.cfg.VaultTable))
-	var content string
-	err := s.db.QueryRowContext(ctx, query, defaultVaultKey).Scan(&content)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	query := fmt.Sprintf("SELECT id, content FROM %s", s.fullTableName(s.cfg.VaultTable))
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("postgres store: load account vault: %w", err)
+		return nil, fmt.Errorf("postgres store: load account vault rows: %w", err)
 	}
-	return []byte(content), nil
+	defer rows.Close()
+	out := make(map[string][]byte)
+	for rows.Next() {
+		var (
+			id      string
+			content string
+		)
+		if err := rows.Scan(&id, &content); err != nil {
+			return nil, fmt.Errorf("postgres store: scan account vault row: %w", err)
+		}
+		out[id] = []byte(content)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres store: iterate account vault rows: %w", err)
+	}
+	return out, nil
 }
 
-// SaveAccountVault persists the raw account vault document.
-func (s *PostgresStore) SaveAccountVault(ctx context.Context, data []byte) error {
+// SaveAccountVaultRow upserts a single account vault row.
+func (s *PostgresStore) SaveAccountVaultRow(ctx context.Context, id string, data []byte) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres store: not initialized")
+	}
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("postgres store: account vault row id is required")
 	}
 	if !json.Valid(bytes.TrimSpace(data)) {
 		return fmt.Errorf("postgres store: invalid account vault JSON")
@@ -640,8 +654,20 @@ func (s *PostgresStore) SaveAccountVault(ctx context.Context, data []byte) error
 		ON CONFLICT (id)
 		DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
 	`, s.fullTableName(s.cfg.VaultTable))
-	if _, err := s.db.ExecContext(ctx, query, defaultVaultKey, json.RawMessage(data)); err != nil {
-		return fmt.Errorf("postgres store: save account vault: %w", err)
+	if _, err := s.db.ExecContext(ctx, query, id, json.RawMessage(data)); err != nil {
+		return fmt.Errorf("postgres store: save account vault row: %w", err)
+	}
+	return nil
+}
+
+// DeleteAccountVaultRow removes a single account vault row.
+func (s *PostgresStore) DeleteAccountVaultRow(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store: not initialized")
+	}
+	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", s.fullTableName(s.cfg.VaultTable))
+	if _, err := s.db.ExecContext(ctx, query, id); err != nil {
+		return fmt.Errorf("postgres store: delete account vault row: %w", err)
 	}
 	return nil
 }

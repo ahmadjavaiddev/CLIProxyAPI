@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -13,41 +14,56 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
-var errStubVaultFailure = errors.New("stub vault failure")
-
 type stubAccountVaultBackend struct {
 	mu      sync.Mutex
-	data    []byte
+	rows    map[string][]byte
 	saves   int
 	loadErr error
 	saveErr error
 }
 
-func (s *stubAccountVaultBackend) LoadAccountVault(context.Context) ([]byte, error) {
+func newStubAccountVaultBackend() *stubAccountVaultBackend {
+	return &stubAccountVaultBackend{rows: make(map[string][]byte)}
+}
+
+func (s *stubAccountVaultBackend) LoadAccountVaultRows(context.Context) (map[string][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
-	return append([]byte(nil), s.data...), nil
+	out := make(map[string][]byte, len(s.rows))
+	for id, data := range s.rows {
+		out[id] = append([]byte(nil), data...)
+	}
+	return out, nil
 }
 
-func (s *stubAccountVaultBackend) SaveAccountVault(_ context.Context, data []byte) error {
+func (s *stubAccountVaultBackend) SaveAccountVaultRow(_ context.Context, authIndex string, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.saveErr != nil {
 		return s.saveErr
 	}
-	s.data = append([]byte(nil), data...)
+	s.rows[authIndex] = append([]byte(nil), data...)
 	s.saves++
 	return nil
 }
 
-func (s *stubAccountVaultBackend) saved() []byte {
+func (s *stubAccountVaultBackend) DeleteAccountVaultRow(_ context.Context, authIndex string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]byte(nil), s.data...)
+	delete(s.rows, authIndex)
+	return nil
 }
+
+func (s *stubAccountVaultBackend) savedRow(authIndex string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.rows[authIndex]...)
+}
+
+var errStubVaultFailure = errors.New("stub vault failure")
 
 func newAccountVaultDBTestHandler(t *testing.T, stub *stubAccountVaultBackend) (*Handler, string) {
 	t.Helper()
@@ -63,8 +79,8 @@ func newAccountVaultDBTestHandler(t *testing.T, stub *stubAccountVaultBackend) (
 	return handler, authIndex
 }
 
-func TestAccountVaultUsesDatabaseBackend(t *testing.T) {
-	stub := &stubAccountVaultBackend{}
+func TestAccountVaultUsesDatabaseRows(t *testing.T) {
+	stub := newStubAccountVaultBackend()
 	handler, authIndex := newAccountVaultDBTestHandler(t, stub)
 
 	putRecorder, putContext := newAccountVaultTestContext(http.MethodPut, "/vault", `{"auth_index":"`+authIndex+`","email":"db@example.com","password":"db-secret"}`)
@@ -72,14 +88,14 @@ func TestAccountVaultUsesDatabaseBackend(t *testing.T) {
 	if putRecorder.Code != http.StatusOK {
 		t.Fatalf("put status = %d body=%s", putRecorder.Code, putRecorder.Body.String())
 	}
-	if saved := string(stub.saved()); !strings.Contains(saved, "db@example.com") || !strings.Contains(saved, "db-secret") {
-		t.Fatalf("database does not hold the vault: %s", saved)
+	if saved := string(stub.savedRow(authIndex)); !strings.Contains(saved, "db@example.com") || !strings.Contains(saved, "db-secret") {
+		t.Fatalf("database row does not hold the vault entry: %s", saved)
 	}
 
 	// Change the database behind the handler's back: reads must follow the DB,
 	// proving it is the source of truth rather than the local mirror.
 	stub.mu.Lock()
-	stub.data = []byte(`{"version":1,"entries":{"` + authIndex + `":{"credentials":{"email":"changed@example.com"},"updated_at":"2026-01-01T00:00:00Z"}}}`)
+	stub.rows[authIndex] = []byte(`{"credentials":{"email":"changed@example.com"},"updated_at":"2026-01-01T00:00:00Z"}`)
 	stub.mu.Unlock()
 
 	getRecorder, getContext := newAccountVaultTestContext(http.MethodGet, "/vault", "")
@@ -93,8 +109,42 @@ func TestAccountVaultUsesDatabaseBackend(t *testing.T) {
 	}
 }
 
-func TestAccountVaultSeedsDatabaseFromLocalFile(t *testing.T) {
-	stub := &stubAccountVaultBackend{}
+func TestAccountVaultSplitsLegacyBlobIntoRows(t *testing.T) {
+	stub := newStubAccountVaultBackend()
+	handler, authIndex := newAccountVaultDBTestHandler(t, stub)
+
+	blob, errMarshal := json.Marshal(accountVaultFile{
+		Version: accountVaultVersion,
+		Entries: map[string]accountVaultStoredEntry{
+			authIndex: {Credentials: accountVaultEntry{Email: "legacy@example.com", Password: "legacy-secret"}},
+		},
+	})
+	if errMarshal != nil {
+		t.Fatalf("marshal blob: %v", errMarshal)
+	}
+	stub.rows[accountVaultLegacyKey] = blob
+
+	getRecorder, getContext := newAccountVaultTestContext(http.MethodGet, "/vault", "")
+	getContext.Request.URL.RawQuery = "auth_index=" + authIndex
+	handler.GetAccountVaultEntry(getContext)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get status = %d body=%s", getRecorder.Code, getRecorder.Body.String())
+	}
+	if !strings.Contains(getRecorder.Body.String(), "legacy@example.com") {
+		t.Fatalf("legacy blob values not returned: %s", getRecorder.Body.String())
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if _, ok := stub.rows[accountVaultLegacyKey]; ok {
+		t.Fatal("legacy blob row was not removed after split")
+	}
+	if saved := string(stub.rows[authIndex]); !strings.Contains(saved, "legacy-secret") {
+		t.Fatalf("legacy blob was not split into rows: %v", stub.rows)
+	}
+}
+
+func TestAccountVaultSeedsRowsFromLocalFile(t *testing.T) {
+	stub := newStubAccountVaultBackend()
 	handler, authIndex := newAccountVaultDBTestHandler(t, stub)
 
 	seed := accountVaultFile{
@@ -116,13 +166,14 @@ func TestAccountVaultSeedsDatabaseFromLocalFile(t *testing.T) {
 	if !strings.Contains(getRecorder.Body.String(), "seed@example.com") {
 		t.Fatalf("seed values not returned: %s", getRecorder.Body.String())
 	}
-	if saved := string(stub.saved()); !strings.Contains(saved, "seed@example.com") {
-		t.Fatalf("local file was not seeded into the database: %s", saved)
+	if saved := string(stub.savedRow(authIndex)); !strings.Contains(saved, "seed-secret") {
+		t.Fatalf("local file was not seeded into rows: %s", saved)
 	}
 }
 
-func TestAccountVaultDatabaseErrorSurfaces(t *testing.T) {
-	stub := &stubAccountVaultBackend{saveErr: errStubVaultFailure}
+func TestAccountVaultRowErrorSurfaces(t *testing.T) {
+	stub := newStubAccountVaultBackend()
+	stub.saveErr = errStubVaultFailure
 	handler, authIndex := newAccountVaultDBTestHandler(t, stub)
 
 	putRecorder, putContext := newAccountVaultTestContext(http.MethodPut, "/vault", `{"auth_index":"`+authIndex+`","email":"x@example.com"}`)

@@ -20,14 +20,19 @@ import (
 const (
 	accountVaultVersion = 1
 	accountVaultMaxSize = 4 << 20
+	// accountVaultLegacyKey is the id of the pre-row whole-document vault row.
+	// New code splits it into per-account rows on first read and deletes it.
+	accountVaultLegacyKey = "vault"
 )
 
-// accountVaultBackend persists the vault in a shared backend (for example,
-// PostgreSQL) instead of a local file. The database is the source of truth
-// when available; the local file remains as a seed and best-effort mirror.
+// accountVaultBackend persists one vault row per account in a shared backend
+// (for example, PostgreSQL) instead of a local file. The database is the
+// source of truth when available; the local file remains as a seed and
+// best-effort mirror.
 type accountVaultBackend interface {
-	LoadAccountVault(ctx context.Context) ([]byte, error)
-	SaveAccountVault(ctx context.Context, data []byte) error
+	LoadAccountVaultRows(ctx context.Context) (map[string][]byte, error)
+	SaveAccountVaultRow(ctx context.Context, authIndex string, data []byte) error
+	DeleteAccountVaultRow(ctx context.Context, authIndex string) error
 }
 
 // vaultBackend returns the shared vault backend: an explicit override when
@@ -150,11 +155,22 @@ func (h *Handler) writeAccountVaultMetadata(c *gin.Context, entry accountVaultEn
 }
 
 func (h *Handler) loadAccountVaultEntry(authIndex string) (accountVaultEntry, time.Time, bool, error) {
-	vault, errLoad := h.loadAccountVaultFile()
-	if errLoad != nil {
-		return accountVaultEntry{}, time.Time{}, false, errLoad
+	if h.vaultBackend() == nil {
+		vault, errLoad := h.loadAccountVaultLocalFile()
+		if errLoad != nil {
+			return accountVaultEntry{}, time.Time{}, false, errLoad
+		}
+		stored, exists := vault.Entries[authIndex]
+		if !exists {
+			return accountVaultEntry{}, time.Time{}, false, nil
+		}
+		return stored.Credentials, stored.UpdatedAt, true, nil
 	}
-	stored, exists := vault.Entries[authIndex]
+	entries, err := h.backendVaultEntries()
+	if err != nil {
+		return accountVaultEntry{}, time.Time{}, false, err
+	}
+	stored, exists := entries[authIndex]
 	if !exists {
 		return accountVaultEntry{}, time.Time{}, false, nil
 	}
@@ -162,76 +178,153 @@ func (h *Handler) loadAccountVaultEntry(authIndex string) (accountVaultEntry, ti
 }
 
 func (h *Handler) saveAccountVaultEntry(authIndex string, entry accountVaultEntry) (time.Time, error) {
+	backend := h.vaultBackend()
 	updatedAt := time.Now().UTC()
-	vault, errLoad := h.loadAccountVaultFile()
-	if errLoad != nil {
-		return time.Time{}, errLoad
+	stored := accountVaultStoredEntry{Credentials: entry, UpdatedAt: updatedAt}
+	if backend == nil {
+		vault, errLoad := h.loadAccountVaultLocalFile()
+		if errLoad != nil {
+			return time.Time{}, errLoad
+		}
+		vault.Entries[authIndex] = stored
+		if errWrite := h.writeAccountVaultLocalFile(vault); errWrite != nil {
+			return time.Time{}, errWrite
+		}
+		return updatedAt, nil
 	}
-	vault.Entries[authIndex] = accountVaultStoredEntry{
-		Credentials: entry,
-		UpdatedAt:   updatedAt,
+	data, err := json.Marshal(stored)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("encode account vault: %w", err)
 	}
-	if errWrite := h.writeAccountVaultFile(vault); errWrite != nil {
-		return time.Time{}, errWrite
+	if err := backend.SaveAccountVaultRow(context.Background(), authIndex, data); err != nil {
+		return time.Time{}, fmt.Errorf("save account vault: %w", err)
 	}
+	h.refreshVaultMirror(backend)
 	return updatedAt, nil
 }
 
-func (h *Handler) loadAccountVaultFile() (accountVaultFile, error) {
+// backendVaultEntries returns the effective vault entries from the shared
+// backend, running one-time migrations first: a legacy whole-document row is
+// split into per-account rows, and a local file seeds an empty database.
+func (h *Handler) backendVaultEntries() (map[string]accountVaultStoredEntry, error) {
 	backend := h.vaultBackend()
-	if backend == nil {
-		return h.loadAccountVaultLocalFile()
-	}
-	data, err := backend.LoadAccountVault(context.Background())
+	ctx := context.Background()
+	rows, err := backend.LoadAccountVaultRows(ctx)
 	if err != nil {
-		return accountVaultFile{}, fmt.Errorf("load account vault: %w", err)
+		return nil, fmt.Errorf("load account vault: %w", err)
 	}
-	if len(bytes.TrimSpace(data)) != 0 {
-		vault, err := decodeAccountVaultBytes(data)
-		if err != nil {
-			return accountVaultFile{}, err
+	if raw, ok := rows[accountVaultLegacyKey]; ok {
+		h.migrateLegacyVaultBlob(backend, raw)
+		if refetched, err := backend.LoadAccountVaultRows(ctx); err == nil {
+			rows = refetched
 		}
-		h.mirrorAccountVaultFile(vault)
-		return vault, nil
 	}
-	// Database is empty: seed it once from the local file when present, so an
-	// existing .account-vault.json migrates automatically.
-	vault, err := h.loadAccountVaultLocalFile()
-	if err != nil {
-		return accountVaultFile{}, err
-	}
-	if _, statErr := os.Stat(h.accountVaultPath()); statErr == nil {
-		if seed, errMarshal := json.Marshal(vault); errMarshal == nil {
-			if errSave := backend.SaveAccountVault(context.Background(), seed); errSave != nil {
-				log.WithError(errSave).Warn("account vault seed from local file failed")
+	if len(rows) == 0 {
+		if seeded, err := h.seedVaultRowsFromFile(backend); err != nil {
+			log.WithError(err).Warn("account vault seed from local file failed")
+		} else if seeded {
+			if refetched, err := backend.LoadAccountVaultRows(ctx); err == nil {
+				rows = refetched
 			}
 		}
 	}
-	return vault, nil
+	entries := make(map[string]accountVaultStoredEntry, len(rows))
+	for id, raw := range rows {
+		if id == accountVaultLegacyKey {
+			continue
+		}
+		stored, err := decodeAccountVaultRow(raw)
+		if err != nil {
+			log.WithError(err).Warn("skipping unreadable account vault row")
+			continue
+		}
+		entries[id] = stored
+	}
+	return entries, nil
 }
 
-func (h *Handler) writeAccountVaultFile(vault accountVaultFile) error {
-	backend := h.vaultBackend()
-	if backend == nil {
-		return h.writeAccountVaultLocalFile(vault)
-	}
-	data, err := json.Marshal(vault)
+// migrateLegacyVaultBlob splits a pre-row whole-document vault row into
+// per-account rows and removes the legacy row. It is idempotent.
+func (h *Handler) migrateLegacyVaultBlob(backend accountVaultBackend, raw []byte) {
+	vault, err := decodeAccountVaultBytes(raw)
 	if err != nil {
-		return fmt.Errorf("encode account vault: %w", err)
+		log.WithError(err).Warn("legacy account vault blob is unreadable; leaving it in place")
+		return
 	}
-	if err := backend.SaveAccountVault(context.Background(), data); err != nil {
-		return fmt.Errorf("save account vault: %w", err)
+	ctx := context.Background()
+	for authIndex, stored := range vault.Entries {
+		data, err := json.Marshal(stored)
+		if err != nil {
+			log.WithError(err).Warn("legacy account vault entry encode failed")
+			return
+		}
+		if err := backend.SaveAccountVaultRow(ctx, authIndex, data); err != nil {
+			log.WithError(err).Warn("legacy account vault split failed")
+			return
+		}
 	}
-	h.mirrorAccountVaultFile(vault)
-	return nil
+	if err := backend.DeleteAccountVaultRow(ctx, accountVaultLegacyKey); err != nil {
+		log.WithError(err).Warn("legacy account vault cleanup failed")
+	}
 }
 
-// mirrorAccountVaultFile refreshes the local vault file copy. Failures only
-// warn: the shared backend already holds the data.
-func (h *Handler) mirrorAccountVaultFile(vault accountVaultFile) {
+// seedVaultRowsFromFile copies a local vault file into an empty database.
+// It reports whether seeding happened.
+func (h *Handler) seedVaultRowsFromFile(backend accountVaultBackend) (bool, error) {
+	if _, statErr := os.Stat(h.accountVaultPath()); statErr != nil {
+		return false, nil
+	}
+	vault, err := h.loadAccountVaultLocalFile()
+	if err != nil {
+		return false, err
+	}
+	ctx := context.Background()
+	for authIndex, stored := range vault.Entries {
+		data, err := json.Marshal(stored)
+		if err != nil {
+			return false, err
+		}
+		if err := backend.SaveAccountVaultRow(ctx, authIndex, data); err != nil {
+			return false, err
+		}
+	}
+	return len(vault.Entries) > 0, nil
+}
+
+// refreshVaultMirror rewrites the local vault file from the database.
+// Failures only warn: the database already holds the data.
+func (h *Handler) refreshVaultMirror(backend accountVaultBackend) {
+	rows, err := backend.LoadAccountVaultRows(context.Background())
+	if err != nil {
+		log.WithError(err).Warn("account vault mirror refresh failed")
+		return
+	}
+	vault := accountVaultFile{Version: accountVaultVersion, Entries: make(map[string]accountVaultStoredEntry, len(rows))}
+	for id, raw := range rows {
+		if id == accountVaultLegacyKey {
+			continue
+		}
+		stored, err := decodeAccountVaultRow(raw)
+		if err != nil {
+			log.WithError(err).Warn("skipping unreadable account vault row")
+			continue
+		}
+		vault.Entries[id] = stored
+	}
 	if err := h.writeAccountVaultLocalFile(vault); err != nil {
 		log.WithError(err).Warn("account vault local mirror write failed")
 	}
+}
+
+func decodeAccountVaultRow(data []byte) (accountVaultStoredEntry, error) {
+	if uint64(len(data)) > accountVaultMaxSize {
+		return accountVaultStoredEntry{}, fmt.Errorf("decode account vault: row exceeds %d bytes", accountVaultMaxSize)
+	}
+	var stored accountVaultStoredEntry
+	if errDecode := json.Unmarshal(data, &stored); errDecode != nil {
+		return accountVaultStoredEntry{}, fmt.Errorf("decode account vault: %w", errDecode)
+	}
+	return stored, nil
 }
 
 func (h *Handler) loadAccountVaultLocalFile() (accountVaultFile, error) {
