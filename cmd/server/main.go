@@ -559,6 +559,12 @@ func main() {
 			}
 		}
 	}
+	// Cloud deployments need file-backed logs for the account Logs Viewer. The
+	// database may contain a configuration created before this default existed.
+	if isCloudDeploy && cfg != nil {
+		cfg.LoggingToFile = true
+	}
+
 	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
