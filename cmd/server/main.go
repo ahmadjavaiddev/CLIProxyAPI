@@ -559,9 +559,10 @@ func main() {
 			}
 		}
 	}
-	// Cloud deployments need file-backed logs for the account Logs Viewer. The
-	// database may contain a configuration created before this default existed.
-	if isCloudDeploy && cfg != nil {
+	// The account UI includes a Logs Viewer, so every deployment must keep a
+	// file-backed log stream available, including databases bootstrapped earlier
+	// with logging disabled.
+	if cfg != nil {
 		cfg.LoggingToFile = true
 	}
 
