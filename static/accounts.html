@@ -788,6 +788,12 @@
     .card-quota .usage-value { color: var(--text); font-weight: 700; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
     .card-quota .usage-reset { color: var(--muted); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
     .card-quota .usage-note { margin-top: 4px; }
+    .logs-panel { margin-top: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+    .logs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .logs-title { margin: 0; font-size: 16px; }
+    .logs-actions { display: flex; gap: 8px; }
+    .logs-output { margin: 0; padding: 16px 18px; min-height: 180px; max-height: 520px; overflow: auto; color: var(--muted); background: #0a0c0b; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+    .logs-output .error { color: var(--danger); }
     .card-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; margin-top: auto; padding-top: 10px; }
     .card-footer .badge { margin-right: auto; }
     .card-footer .account-status { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; }
@@ -828,6 +834,7 @@
           <svg class="icon" aria-hidden="true"><use href="#refresh"></use></svg>
           Refresh
         </button>
+        <button class="button" id="logsButton" type="button">Logs Viewer</button>
         <button class="button primary" id="addButton" type="button">
           <svg class="icon" aria-hidden="true"><use href="#plus"></use></svg>
           Add account
@@ -858,6 +865,17 @@
       <div class="account-list" id="accountList" aria-live="polite">
         <div class="empty">Loading accounts…</div>
       </div>
+    </section>
+
+    <section class="logs-panel" id="logsPanel" hidden aria-label="Logs Viewer">
+      <div class="logs-head">
+        <h2 class="logs-title">Logs Viewer</h2>
+        <div class="logs-actions">
+          <button class="button small" id="logsRefresh" type="button">Refresh</button>
+          <button class="button small" id="logsClear" type="button">Clear</button>
+        </div>
+      </div>
+      <pre class="logs-output" id="logsOutput">Loading logs…</pre>
     </section>
 
   </main>
@@ -1762,6 +1780,55 @@
     });
 
     loadAccounts().catch(error => showNotice(error.message, "error"));
+    let logsCursor = "";
+    let logsPolling = null;
+    const logsOutput = document.getElementById("logsOutput");
+    const logsPanel = document.getElementById("logsPanel");
+    function redactLogLine(line) {
+      return line
+        .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s,]+/gi, "$1[REDACTED]")
+        .replace(/(\b(?:api[-_ ]?key|token|secret|password|cookie)\s*[:=]\s*)[^\s,]+/gi, "$1[REDACTED]")
+        .replace(/(sk-[A-Za-z0-9_-]{8,})/g, "[REDACTED]");
+    }
+    function appendLogs(lines) {
+      if (!lines || !lines.length) return;
+      const existing = logsOutput.textContent === "Loading logs…" ? "" : logsOutput.textContent;
+      const all = (existing ? existing.split("\\n") : []).concat(lines.map(redactLogLine));
+      logsOutput.textContent = all.slice(-2000).join("\\n");
+      logsOutput.scrollTop = logsOutput.scrollHeight;
+    }
+    async function loadLogs(reset = false) {
+      try {
+        const query = reset || !logsCursor ? "?limit=200" : "?cursor=" + encodeURIComponent(logsCursor) + "&limit=200";
+        const data = await request("/logs" + query);
+        if (reset || data["cursor-reset"]) logsOutput.textContent = "";
+        appendLogs(data.lines || []);
+        logsCursor = data["next-cursor"] || logsCursor;
+        if (!logsOutput.textContent) logsOutput.textContent = "No logs available.";
+      } catch (error) {
+        logsOutput.textContent = "Unable to load logs: " + error.message;
+      }
+    }
+    function toggleLogs() {
+      const opening = logsPanel.hidden;
+      logsPanel.hidden = !opening;
+      if (opening) {
+        loadLogs(true);
+        clearInterval(logsPolling);
+        logsPolling = setInterval(() => loadLogs(false), 2000);
+        logsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        clearInterval(logsPolling);
+        logsPolling = null;
+      }
+    }
+    document.getElementById("logsButton").addEventListener("click", toggleLogs);
+    document.getElementById("logsRefresh").addEventListener("click", () => loadLogs(true));
+    document.getElementById("logsClear").addEventListener("click", async () => {
+      if (!confirm("Clear all application logs?")) return;
+      try { await request("/logs", { method: "DELETE" }); logsCursor = ""; logsOutput.textContent = "Logs cleared."; }
+      catch (error) { logsOutput.textContent = "Unable to clear logs: " + error.message; }
+    });
   </script>
 </body>
 </html>
