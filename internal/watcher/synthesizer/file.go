@@ -205,6 +205,18 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	// API-key providers store the secret at the top level of the auth JSON.
+	// Promote it into the canonical attribute map used by provider executors.
+	if rawKey, ok := metadata[coreauth.AttributeAPIKey].(string); ok && strings.TrimSpace(rawKey) != "" {
+		a.Attributes[coreauth.AttributeAPIKey] = rawKey
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindAPIKey
+	}
+	if rawBase, ok := metadata["base_url"].(string); ok && strings.TrimSpace(rawBase) != "" {
+		a.Attributes["base_url"] = strings.TrimSpace(rawBase)
+	}
+	if rawVersion, ok := metadata["cli_version"].(string); ok && strings.TrimSpace(rawVersion) != "" {
+		a.Attributes["cli_version"] = strings.TrimSpace(rawVersion)
+	}
 	// Read priority from auth file.
 	if rawPriority, ok := metadata["priority"]; ok {
 		switch v := rawPriority.(type) {
