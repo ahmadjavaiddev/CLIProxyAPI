@@ -37,6 +37,10 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	if err := json.Unmarshal(req.Payload, &input); err != nil { return nil, fmt.Errorf("commandcode: invalid request: %w", err) }
 	body := map[string]any{"config": map[string]any{"workingDir": ""}, "memory":"", "taste":"", "skills":"", "permissionMode":"standard", "threadId": "cc-thread", "params": map[string]any{"model": model, "stream": true}}
 	params := body["params"].(map[string]any)
+	if raw, ok := input["input"]; ok {
+		messages := codexInputToMessages(raw)
+		if len(messages) > 0 { params["messages"] = messages }
+	}
 	for _, k := range []string{"messages", "system", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stop"} { if v, ok := input[k]; ok { params[k] = v } }
 	if v, ok := input["reasoning_effort"].(string); ok { if clipped := commandcode.ResolveEffort(model, v); clipped != "" { params["reasoning_effort"] = clipped } }
 	if v, ok := input["model"].(string); ok && model == "" { params["model"] = commandcode.ResolveModel(v) }
@@ -45,6 +49,21 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	out := make(chan cliproxyexecutor.StreamChunk, 8)
 	go func() { defer resp.Body.Close(); defer close(out); scanner := bufio.NewScanner(resp.Body); scanner.Buffer(make([]byte, 4096), 4<<20); id := "cc-response"; for scanner.Scan() { event, ok := commandcode.ParseLine(scanner.Text()); if !ok { continue }; var d map[string]any; _ = json.Unmarshal(event.Data, &d); var payload []byte; switch event.Type { case "text-delta": payload = ccChatChunk(id, req.Model, map[string]any{"content": stringValue(d["text"])}); case "reasoning-delta": payload = ccChatChunk(id, req.Model, map[string]any{"reasoning_content": stringValue(d["text"])}); case "finish": payload = ccChatChunk(id, req.Model, map[string]any{"finish_reason": "stop"}) }; if len(payload)>0 { select { case out <- cliproxyexecutor.StreamChunk{Payload: payload}: case <-ctx.Done(): return } } }; if err := scanner.Err(); err != nil { select { case out <- cliproxyexecutor.StreamChunk{Err: err}: case <-ctx.Done(): } } }()
 	return &cliproxyexecutor.StreamResult{Headers: resp.Header.Clone(), Chunks: out}, nil
+}
+
+func codexInputToMessages(raw any) []map[string]any {
+	if text, ok := raw.(string); ok && strings.TrimSpace(text) != "" { return []map[string]any{{"role":"user", "content":text}} }
+	items, ok := raw.([]any); if !ok { return nil }
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any); if !ok { continue }
+		role, _ := m["role"].(string); if role == "" { role = "user" }
+		content := m["content"]
+		if content == nil { content = m["text"] }
+		if content == nil { continue }
+		out = append(out, map[string]any{"role": role, "content": content})
+	}
+	return out
 }
 
 func stringValue(v any) string { s, _ := v.(string); return s }
