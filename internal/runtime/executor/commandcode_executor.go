@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/client/commandcode"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/google/uuid"
 )
 
 // CommandCodeExecutor is the Command Code provider binding. The common
@@ -35,7 +38,8 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	model := commandcode.ResolveModel(strings.TrimPrefix(req.Model, "commandcode/"))
 	var input map[string]any
 	if err := json.Unmarshal(req.Payload, &input); err != nil { return nil, fmt.Errorf("commandcode: invalid request: %w", err) }
-	body := map[string]any{"config": map[string]any{"workingDir": ""}, "memory":"", "taste":"", "skills":"", "permissionMode":"standard", "threadId": "cc-thread", "params": map[string]any{"model": model, "stream": true}}
+	workingDir, _ := os.Getwd()
+	body := map[string]any{"config": map[string]any{"workingDir": workingDir, "environment": "linux-x64", "date": time.Now().UTC().Format("2006-01-02"), "structure": []any{}, "isGitRepo": false, "currentBranch": "", "mainBranch": "", "gitStatus": ""}, "memory":"", "taste":"", "skills":"", "permissionMode":"standard", "threadId": uuid.NewString(), "params": map[string]any{"model": model, "stream": true}}
 	params := body["params"].(map[string]any)
 	if raw, ok := input["input"]; ok {
 		messages := codexInputToMessages(raw)
