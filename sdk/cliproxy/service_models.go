@@ -101,7 +101,6 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = applyExcludedModels(models, excluded)
 	case "antigravity":
 		models = registry.GetAntigravityModels()
-		models = applyAntigravityFetchedModelCapabilities(models, s.fetchAntigravityModelCapabilityHintsForAuth(ctx, a))
 		models = applyExcludedModels(models, excluded)
 	case "claude":
 		models = registry.GetClaudeModels()
@@ -276,6 +275,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	models = s.appendPluginModels(key, models)
 	if len(models) > 0 {
 		s.registerResolvedModelsForAuth(a, key, applyModelPrefixes(models, a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
+		if strings.EqualFold(strings.TrimSpace(a.Provider), "antigravity") {
+			s.asyncProbeAntigravityCapabilities(ctx, a, key)
+		}
 		return
 	}
 
@@ -613,6 +615,11 @@ func applyModelPrefixes(models []*ModelInfo, prefix string, forceModelPrefix boo
 		}
 		clone := *model
 		clone.ID = trimmedPrefix + "/" + baseID
+		if clone.MetadataModelID == "" {
+			clone.MetadataModelID = baseID
+		}
+		clone.ExplicitThinking = model.ExplicitThinking
+		clone.ExplicitInputModalities = model.ExplicitInputModalities
 		addModel(&clone)
 	}
 	return out
@@ -693,14 +700,19 @@ func buildConfiguredModelInfo(model modelEntry, ownedBy, modelType string, creat
 	if displayName == "" {
 		displayName = alias
 	}
+	metadataModelID := name
+	if metadataModelID == "" {
+		metadataModelID = alias
+	}
 	info := &ModelInfo{
-		ID:          alias,
-		Object:      "model",
-		Created:     created,
-		OwnedBy:     ownedBy,
-		Type:        modelType,
-		DisplayName: displayName,
-		UserDefined: userDefined,
+		ID:              alias,
+		MetadataModelID: metadataModelID,
+		Object:          "model",
+		Created:         created,
+		OwnedBy:         ownedBy,
+		Type:            modelType,
+		DisplayName:     displayName,
+		UserDefined:     userDefined,
 	}
 	if maxContextModel, okMaxContext := any(model).(modelMaxContextLengthEntry); okMaxContext {
 		if maxContextLength := maxContextModel.GetMaxContextLength(); maxContextLength > 0 {
@@ -733,6 +745,12 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 		thinkingSupport := model.Thinking
 		if thinkingSupport == nil && !model.Image {
 			thinkingSupport = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
+		}
+		if model.Thinking != nil {
+			info.ExplicitThinking = true
+		}
+		if len(model.InputModalities) > 0 {
+			info.ExplicitInputModalities = true
 		}
 		info.Thinking = modelconfig.NormalizeThinkingSupport(thinkingSupport)
 		info.SupportedInputModalities = normalizeCompatConfigModalities(model.InputModalities)
@@ -785,6 +803,9 @@ func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*M
 			continue
 		}
 		seen[key] = struct{}{}
+		if model.GetThinking() != nil {
+			info.ExplicitThinking = true
+		}
 		if resolved := modelconfig.ResolveModelInfo(name, modelType, model.GetThinking()); resolved.Thinking != nil {
 			info.Thinking = resolved.Thinking
 		}
@@ -1020,6 +1041,13 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			seen[aliasKey] = struct{}{}
 			clone := *model
 			clone.ID = mappedID
+			if model.MetadataModelID != "" {
+				clone.MetadataModelID = model.MetadataModelID
+			} else {
+				clone.MetadataModelID = id
+			}
+			clone.ExplicitThinking = model.ExplicitThinking
+			clone.ExplicitInputModalities = model.ExplicitInputModalities
 			if entry.displayName != "" {
 				clone.DisplayName = entry.displayName
 			}

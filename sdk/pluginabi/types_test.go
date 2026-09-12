@@ -27,8 +27,8 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 }
 
 func TestMethodNamesAreStable(t *testing.T) {
-	if SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", SchemaVersion)
+	if SchemaVersion != 6 {
+		t.Fatalf("SchemaVersion = %d, want 6", SchemaVersion)
 	}
 	if SchemaVersionWebSocketResponseObserver != 4 {
 		t.Fatalf("SchemaVersionWebSocketResponseObserver = %d, want 4", SchemaVersionWebSocketResponseObserver)
@@ -38,6 +38,9 @@ func TestMethodNamesAreStable(t *testing.T) {
 	}
 	if SchemaVersionStreamChunkOmitHistory != 5 {
 		t.Fatalf("SchemaVersionStreamChunkOmitHistory = %d, want 5", SchemaVersionStreamChunkOmitHistory)
+	}
+	if SchemaVersionRawManagementResponse != 6 {
+		t.Fatalf("SchemaVersionRawManagementResponse = %d, want 6", SchemaVersionRawManagementResponse)
 	}
 	if MethodPluginRegister != "plugin.register" {
 		t.Fatalf("MethodPluginRegister = %q", MethodPluginRegister)
@@ -93,6 +96,9 @@ func TestMethodNamesAreStable(t *testing.T) {
 	if MethodHostAuthSave != "host.auth.save" {
 		t.Fatalf("MethodHostAuthSave = %q", MethodHostAuthSave)
 	}
+	if MethodHostAffinityLookup != "host.affinity.lookup" {
+		t.Fatalf("MethodHostAffinityLookup = %q", MethodHostAffinityLookup)
+	}
 	if MethodExecutorExecuteStream != "executor.execute_stream" {
 		t.Fatalf("MethodExecutorExecuteStream = %q", MethodExecutorExecuteStream)
 	}
@@ -104,5 +110,17 @@ func TestSchedulerPickMethodName(t *testing.T) {
 	}
 	if MethodModelRoute != "model.route" {
 		t.Fatalf("MethodModelRoute = %q", MethodModelRoute)
+	}
+	if MethodQuotaIdentifier != "quota.identifier" {
+		t.Fatalf("MethodQuotaIdentifier = %q", MethodQuotaIdentifier)
+	}
+	if MethodQuotaDescribe != "quota.describe" {
+		t.Fatalf("MethodQuotaDescribe = %q", MethodQuotaDescribe)
+	}
+	if MethodQuotaFetch != "quota.fetch" {
+		t.Fatalf("MethodQuotaFetch = %q", MethodQuotaFetch)
+	}
+	if MethodQuotaReset != "quota.reset" {
+		t.Fatalf("MethodQuotaReset = %q", MethodQuotaReset)
 	}
 }

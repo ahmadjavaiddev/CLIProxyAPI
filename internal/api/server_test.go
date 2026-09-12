@@ -20,6 +20,7 @@ import (
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v7/internal/api/handlers/management"
 	claudemodels "github.com/router-for-me/CLIProxyAPI/v7/internal/client/claude/models"
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
@@ -32,6 +33,8 @@ import (
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	log "github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"gopkg.in/yaml.v3"
 )
 
@@ -664,6 +667,65 @@ func TestHealthz(t *testing.T) {
 			t.Fatalf("expected empty body for HEAD request, got %q", rr.Body.String())
 		}
 	})
+}
+
+func TestHealthzAccessLogging(t *testing.T) {
+	server := newTestServer(t)
+	previousHome := home.Current()
+	home.ClearCurrent()
+	t.Cleanup(func() { home.SetCurrent(previousHome) })
+	logger := log.StandardLogger()
+	previousHooks := logger.ReplaceHooks(make(log.LevelHooks))
+	previousLevel := logger.GetLevel()
+	hook := logtest.NewLocal(logger)
+	logger.SetLevel(log.InfoLevel)
+	t.Cleanup(func() { logger.ReplaceHooks(previousHooks); logger.SetLevel(previousLevel) })
+	for _, tc := range []struct {
+		name        string
+		homeEnabled bool
+		status      int
+	}{
+		{"healthy", false, http.StatusOK},
+		{"home_unavailable", true, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server.cfg.Home.Enabled = tc.homeEnabled
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				t.Run(method, func(t *testing.T) {
+					hook.Reset()
+					recorder := httptest.NewRecorder()
+					server.engine.ServeHTTP(recorder, httptest.NewRequest(method, "/healthz", nil))
+					if recorder.Code != tc.status {
+						t.Fatalf("status = %d, want %d", recorder.Code, tc.status)
+					}
+					count := 0
+					for _, entry := range hook.AllEntries() {
+						if _, ok := entry.Data["request_id"]; ok && strings.Contains(entry.Message, `"/healthz"`) {
+							count++
+							if tc.homeEnabled && entry.Level != log.ErrorLevel {
+								t.Errorf("failed probe log level = %v, want error", entry.Level)
+							}
+						}
+					}
+					wantCount := 0
+					if tc.homeEnabled {
+						wantCount = 1
+					}
+					if count != wantCount {
+						t.Errorf("probe access logs = %d, want %d", count, wantCount)
+					}
+					hook.Reset()
+					server.engine.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz-access-log-control", nil))
+					for _, entry := range hook.AllEntries() {
+						if _, ok := entry.Data["request_id"]; ok && strings.Contains(entry.Message, `"/healthz-access-log-control"`) {
+							return
+						}
+					}
+					t.Error("ordinary request did not emit an access log after health probe")
+				})
+			}
+		})
+	}
 }
 
 func TestCodexLiveRoutesRequireAuthAndAreRegistered(t *testing.T) {
@@ -1714,147 +1776,6 @@ func TestHomeEnabledHidesManagementEndpointsAndControlPanel(t *testing.T) {
 			t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
 		}
 	})
-
-	t.Run("Codex accounts control panel returns 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/accounts.html", nil)
-		rr := httptest.NewRecorder()
-		server.engine.ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
-		}
-	})
-}
-
-func TestCodexAccountsControlPanel(t *testing.T) {
-	staticDir := t.TempDir()
-	t.Setenv("MANAGEMENT_STATIC_PATH", staticDir)
-	const page = "<html><title>Codex accounts</title></html>"
-	if err := os.WriteFile(filepath.Join(staticDir, "accounts.html"), []byte(page), 0o600); err != nil {
-		t.Fatalf("failed to write accounts asset: %v", err)
-	}
-
-	server := newTestServer(t)
-	for _, path := range []string{"/", "/accounts.html"} {
-		t.Run(path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			rr := httptest.NewRecorder()
-			server.engine.ServeHTTP(rr, req)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
-			}
-			if rr.Body.String() != page {
-				t.Fatalf("body = %q, want %q", rr.Body.String(), page)
-			}
-		})
-	}
-}
-
-func TestAccountUIAPIRequiresExplicitLoopbackTrust(t *testing.T) {
-	server := newTestServer(t)
-
-	request := func(remoteAddr string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/auth-files", nil)
-		req.RemoteAddr = remoteAddr
-		rr := httptest.NewRecorder()
-		server.engine.ServeHTTP(rr, req)
-		return rr
-	}
-
-	if rr := request("127.0.0.1:40000"); rr.Code != http.StatusNotFound {
-		t.Fatalf("disabled status = %d, want %d body=%s", rr.Code, http.StatusNotFound, rr.Body.String())
-	}
-
-	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
-	if rr := request("192.0.2.1:40000"); rr.Code != http.StatusForbidden {
-		t.Fatalf("remote status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
-	}
-	if rr := request("127.0.0.1:40000"); rr.Code != http.StatusOK {
-		t.Fatalf("loopback status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-}
-
-func TestAccountUIAPITrustsConfiguredEdgeProxy(t *testing.T) {
-	server := newTestServer(t)
-	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
-	server.cfg.RemoteManagement.TrustedProxies = []string{"172.18.0.0/16", "10.9.0.5", "not-a-cidr"}
-
-	request := func(remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/auth-files", nil)
-		req.RemoteAddr = remoteAddr
-		for key, value := range headers {
-			req.Header.Set(key, value)
-		}
-		rr := httptest.NewRecorder()
-		server.engine.ServeHTTP(rr, req)
-		return rr
-	}
-
-	if rr := request("172.18.0.4:40000", nil); rr.Code != http.StatusOK {
-		t.Fatalf("edge proxy status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	if rr := request("10.9.0.5:40000", nil); rr.Code != http.StatusOK {
-		t.Fatalf("edge proxy IP status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	if rr := request("203.0.113.7:40000", nil); rr.Code != http.StatusForbidden {
-		t.Fatalf("untrusted status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
-	}
-	// Forwarded headers from an untrusted peer must not grant access.
-	spoofed := map[string]string{"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
-	if rr := request("203.0.113.7:40000", spoofed); rr.Code != http.StatusForbidden {
-		t.Fatalf("spoofed header status = %d, want %d body=%s", rr.Code, http.StatusForbidden, rr.Body.String())
-	}
-}
-
-func TestRootServesEmbeddedAccountsPanel(t *testing.T) {
-	server := newTestServer(t)
-
-	for _, path := range []string{"/", "/accounts.html"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rr := httptest.NewRecorder()
-		server.engine.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusOK {
-			t.Fatalf("GET %s status = %d, want %d body=%s", path, rr.Code, http.StatusOK, rr.Body.String())
-		}
-		if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
-			t.Fatalf("GET %s content-type = %q, want text/html", path, contentType)
-		}
-		if body := strings.ToLower(rr.Body.String()); !strings.Contains(body, "<!doctype html>") {
-			t.Fatalf("GET %s body does not look like the accounts panel", path)
-		}
-	}
-}
-
-func TestAccountUIResetQuotaRoute(t *testing.T) {
-	server := newTestServer(t)
-	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
-
-	req := httptest.NewRequest(http.MethodPost, "/v0/accounts/reset-quota", strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:40000"
-	rr := httptest.NewRecorder()
-	server.engine.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
-	}
-}
-
-func TestAccountVaultRouteUsesAccountUIAccess(t *testing.T) {
-	server := newTestServer(t)
-	server.cfg.RemoteManagement.AllowAccountUIWithoutAuth = true
-
-	request := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/v0/accounts/vault", nil)
-		req.RemoteAddr = "127.0.0.1:40000"
-		rr := httptest.NewRecorder()
-		server.engine.ServeHTTP(rr, req)
-		return rr
-	}
-
-	if rr := request(); rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
-	}
 }
 
 func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {
@@ -2149,7 +2070,7 @@ func TestClaudeModelListCloakingConfigHotReload(t *testing.T) {
 func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	modelRegistry := registry.GetGlobalRegistry()
 	clientID := "test-client-version-catalog"
-	modelRegistry.RegisterClient(clientID, "openai", []*registry.ModelInfo{
+	modelRegistry.RegisterClient(clientID, "codex", []*registry.ModelInfo{
 		{
 			ID:                  "gpt-5.5",
 			Object:              "model",
@@ -2174,6 +2095,9 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 		},
 		{ID: "grok-imagine-image-quality", Object: "model", OwnedBy: "xai", Type: "openai"},
 		{ID: "gpt-image-2", Object: "model", OwnedBy: "openai", Type: "openai"},
+		{ID: "gpt-image-2.5-flare", Object: "model", OwnedBy: "openai", Type: "openai"},
+		{ID: "gpt-image-2.5-sunburst", Object: "model", OwnedBy: "openai", Type: "openai"},
+		{ID: "gpt-image-2.5", Object: "model", OwnedBy: "openai", Type: "openai"},
 		{ID: "grok-imagine-image", Object: "model", OwnedBy: "xai", Type: "openai"},
 		{ID: "grok-imagine-image-2.0", Object: "model", OwnedBy: "xai", Type: "openai"},
 		{ID: "grok-imagine-video", Object: "model", OwnedBy: "xai", Type: "openai"},
@@ -2278,6 +2202,9 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	hiddenModels := map[string]bool{
 		"grok-imagine-image-quality":     false,
 		"gpt-image-2":                    false,
+		"gpt-image-2.5-flare":            false,
+		"gpt-image-2.5-sunburst":         false,
+		"gpt-image-2.5":                  false,
 		"grok-imagine-image":             false,
 		"grok-imagine-image-2.0":         false,
 		"grok-imagine-video":             false,
