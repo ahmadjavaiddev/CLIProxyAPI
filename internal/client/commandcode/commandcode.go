@@ -36,7 +36,11 @@ func ParseLine(line string) (Event, bool) {
 func ParseStream(ctx context.Context, r io.Reader, out chan<- Event) error {
 	defer close(out)
 	s := bufio.NewScanner(r); s.Buffer(make([]byte, 4096), 4<<20)
-	for s.Scan() { select { case <-ctx.Done(): return ctx.Err(); case out <- func() Event { e, _ := ParseLine(s.Text()); return e }(): } }
+	for s.Scan() {
+		e, ok := ParseLine(s.Text())
+		if !ok { continue }
+		select { case <-ctx.Done(): return ctx.Err(); case out <- e: }
+	}
 	return s.Err()
 }
 
