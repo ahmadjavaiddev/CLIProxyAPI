@@ -42,10 +42,15 @@ func CommandCodeEfforts(id string) []string { return commandCodeData().Efforts[R
 func commandCodeStaticModels() []*ModelInfo {
  c := commandCodeData()
  out := make([]*ModelInfo,0,len(c.Builtin))
- for _, id := range c.Builtin {
+	for _, id := range c.Builtin {
  m := &ModelInfo{ID:id,Object:"model",OwnedBy:"commandcode",Type:"commandcode",DisplayName:c.Names[id],ContextLength:c.Context[id],MaxCompletionTokens:c.Output[id]}
  if levels := c.Efforts[id]; len(levels)>0 { m.Thinking=&ThinkingSupport{Levels:levels} }
- out=append(out,m)
+	 out=append(out,m)
+	 // Register a namespaced alias so requests can explicitly select the
+	 // Command Code scheduler even when another provider exposes the same ID.
+	 alias := *m
+	 alias.ID = "commandcode/" + id
+	 out = append(out, &alias)
  }
  return out
 }
