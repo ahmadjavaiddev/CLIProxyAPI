@@ -26,6 +26,7 @@ var nativeProviderAppliers = map[string]ProviderApplier{
 	"codex":       nil,
 	"antigravity": nil,
 	"kimi":        nil,
+	"commandcode": nil,
 	"xai":         nil,
 }
 

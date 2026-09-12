@@ -77,6 +77,15 @@ func GetKimiModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Kimi)
 }
 
+// GetCommandCodeModels returns the built-in Command Code model catalog.
+func GetCommandCodeModels() []*ModelInfo {
+	return []*ModelInfo{
+		{ID: "deepseek/deepseek-v4-pro", Object: "model", OwnedBy: "commandcode", DisplayName: "DeepSeek V4 Pro", ContextLength: 1048576, MaxCompletionTokens: 393216, Thinking: &ThinkingSupport{Levels: []string{"high", "max"}}},
+		{ID: "zai-org/GLM-5.2", Object: "model", OwnedBy: "commandcode", DisplayName: "GLM-5.2", ContextLength: 1048576, Thinking: &ThinkingSupport{Levels: []string{"high", "max"}}},
+		{ID: "moonshotai/Kimi-K3", Object: "model", OwnedBy: "commandcode", DisplayName: "Kimi K3", ContextLength: 1048576},
+	}
+}
+
 // GetAntigravityModels returns the standard Antigravity model definitions.
 func GetAntigravityModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Antigravity)
