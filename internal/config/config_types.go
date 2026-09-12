@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"net"
-	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginstore"
@@ -180,6 +178,9 @@ type CodexConfig struct {
 	OptimizeMultiAgentV2 bool `yaml:"optimize-multi-agent-v2" json:"optimize-multi-agent-v2"`
 	// OrphanDelegationCompatibility enables opt-in compatibility for orphan Codex delegation outputs.
 	OrphanDelegationCompatibility bool `yaml:"orphan-delegation-compatibility" json:"orphan-delegation-compatibility"`
+	// ModelLevelCooling scopes Codex usage_limit_reached quota cooldowns to the requested model
+	// rather than cooling down the entire credential across all sibling models.
+	ModelLevelCooling bool `yaml:"model-level-cooling" json:"model-level-cooling"`
 	// LiveMediaRelay terminates and relays Codex Live WebRTC media in this process.
 	LiveMediaRelay CodexLiveMediaRelayConfig `yaml:"live-media-relay" json:"live-media-relay"`
 }
@@ -224,8 +225,6 @@ type PprofConfig struct {
 type RemoteManagement struct {
 	// AllowRemote toggles remote (non-localhost) access to management API.
 	AllowRemote bool `yaml:"allow-remote"`
-	// AllowAccountUIWithoutAuth exposes the focused account UI API to loopback callers without a management key.
-	AllowAccountUIWithoutAuth bool `yaml:"allow-account-ui-without-auth"`
 	// SecretKey is the management key (plaintext or bcrypt hashed). YAML key intentionally 'secret-key'.
 	SecretKey string `yaml:"secret-key"`
 	// DisableControlPanel skips serving and syncing the bundled management UI when true.
@@ -236,46 +235,6 @@ type RemoteManagement struct {
 	// PanelGitHubRepository overrides the GitHub repository used to fetch the management panel asset.
 	// Accepts either a repository URL (https://github.com/org/repo) or an API releases endpoint.
 	PanelGitHubRepository string `yaml:"panel-github-repository"`
-	// TrustedProxies lists IPs or CIDRs of edge reverse proxies (for example, Caddy or Nginx
-	// in front of this server) whose TCP connections are treated like loopback for the
-	// loopback-only gates (account UI API, management allow-remote gate). The management
-	// secret key is still required. Keep this empty unless the server port is reachable
-	// only through those proxies; never publish the server port directly to the internet
-	// while entries are listed here.
-	TrustedProxies []string `yaml:"trusted-proxies"`
-}
-
-// EdgePeerAllowed reports whether a TCP peer address (host:port or bare IP) is a
-// loopback address or belongs to the configured trusted edge proxies.
-func (r RemoteManagement) EdgePeerAllowed(address string) bool {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
-	if err != nil {
-		host = strings.Trim(strings.TrimSpace(address), "[]")
-	}
-	ip := net.ParseIP(host)
-	if ip != nil && ip.IsLoopback() {
-		return true
-	}
-	for _, entry := range r.TrustedProxies {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		if strings.Contains(entry, "/") {
-			_, network, errParse := net.ParseCIDR(entry)
-			if errParse != nil || network == nil {
-				continue
-			}
-			if ip != nil && network.Contains(ip) {
-				return true
-			}
-			continue
-		}
-		if trusted := net.ParseIP(strings.Trim(entry, "[]")); trusted != nil && ip != nil && trusted.Equal(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 // QuotaExceeded defines the behavior when API quota limits are exceeded.

@@ -52,29 +52,6 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
-	s.engine.GET("/accounts.html", s.serveCodexAccountsControlPanel)
-	accountsUI := s.engine.Group("/v0/accounts")
-	accountsUI.Use(s.accountUIAvailabilityMiddleware())
-	{
-		accountsUI.GET("/auth-files", s.mgmt.ListAuthFiles)
-		accountsUI.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
-		accountsUI.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
-		accountsUI.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
-		accountsUI.GET("/quota", s.mgmt.GetCodexQuota)
-		accountsUI.GET("/logs", s.mgmt.GetLogs)
-		accountsUI.DELETE("/logs", s.mgmt.DeleteLogs)
-		accountsUI.POST("/reset-quota", s.mgmt.ConsumeCodexQuotaReset)
-		accountsUI.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
-		accountsUI.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
-		accountsUI.GET("/get-auth-status", s.mgmt.GetAuthStatus)
-		accountsUI.DELETE("/oauth-session", s.mgmt.CancelAuthSession)
-
-		vaultUI := accountsUI.Group("/vault")
-		{
-			vaultUI.GET("", s.mgmt.GetAccountVaultEntry)
-			vaultUI.PUT("", s.mgmt.PutAccountVaultEntry)
-		}
-	}
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
@@ -151,7 +128,16 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Root endpoint
-	s.engine.GET("/", s.serveCodexAccountsControlPanel)
+	s.engine.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "CLI Proxy API Server",
+			"endpoints": []string{
+				"POST /v1/chat/completions",
+				"POST /v1/completions",
+				"GET /v1/models",
+			},
+		})
+	})
 
 	// OAuth callback endpoints (reuse main server port)
 	// These endpoints receive provider redirects and persist
@@ -652,7 +638,15 @@ func (s *Server) handleGrokModels(c *gin.Context) {
 	} else {
 		models = grokModelsFromRegistryInfos(registry.GetGlobalRegistry().GetAvailableModelInfos())
 	}
-	c.JSON(http.StatusOK, grokbuild.BuildResponse(models))
+	s.writeModelListResponse(c, "openai", grokbuild.BuildResponse(models))
+}
+
+func (s *Server) writeModelListResponse(c *gin.Context, sourceFormat string, payload any) {
+	if s != nil && s.handlers != nil {
+		s.handlers.WriteModelListResponse(c, sourceFormat, payload)
+		return
+	}
+	c.JSON(http.StatusOK, payload)
 }
 
 // handleHomeCodexClientModels builds the Codex client catalog from Home model IDs.
@@ -668,7 +662,7 @@ func (s *Server) handleHomeCodexClientModels(c *gin.Context, clientVersion strin
 		models = append(models, formatHomeCodexModel(entry))
 	}
 
-	c.JSON(http.StatusOK, codexmodels.BuildResponseForClient(models, nil, s.cfg.Codex.OptimizeMultiAgentV2, clientVersion))
+	s.writeModelListResponse(c, "openai", codexmodels.BuildResponseForClient(models, nil, s.cfg.Codex.OptimizeMultiAgentV2, clientVersion))
 }
 
 func formatHomeCodexModel(entry homeModelEntry) map[string]any {
@@ -740,7 +734,7 @@ func (s *Server) handleHomeModels(c *gin.Context) {
 
 	if isClaude {
 		disableCloaking := s.cfg != nil && s.cfg.ClaudeCode.DisableCloakingModelList
-		c.JSON(http.StatusOK, claudemodels.BuildResponse(formatHomeClaudeModels(entries), disableCloaking))
+		s.writeModelListResponse(c, "claude", claudemodels.BuildResponse(formatHomeClaudeModels(entries), disableCloaking))
 		return
 	}
 
@@ -758,7 +752,7 @@ func (s *Server) handleHomeModels(c *gin.Context) {
 		}
 		filtered = append(filtered, model)
 	}
-	c.JSON(http.StatusOK, gin.H{
+	s.writeModelListResponse(c, "openai", gin.H{
 		"object": "list",
 		"data":   filtered,
 	})
@@ -806,7 +800,7 @@ func (s *Server) handleHomeGeminiModels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	s.writeModelListResponse(c, "gemini", gin.H{
 		"models": formatHomeGeminiModels(entries),
 	})
 }

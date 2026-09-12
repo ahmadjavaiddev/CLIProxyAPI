@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
-	forkstatic "github.com/router-for-me/CLIProxyAPI/v7/static"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -41,6 +39,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/plugins/:id/config", s.mgmt.GetPluginConfig)
 		mgmt.PUT("/plugins/:id/config", s.mgmt.PutPluginConfig)
 		mgmt.PATCH("/plugins/:id/config", s.mgmt.PatchPluginConfig)
+		mgmt.GET("/plugins/:id/quota", s.mgmt.GetPluginQuota)
+		mgmt.POST("/plugins/:id/quota", s.mgmt.FetchPluginQuota)
+		mgmt.DELETE("/plugins/:id/quota", s.mgmt.ResetPluginQuota)
+		mgmt.POST("/plugins/:id/quota/reset", s.mgmt.ResetPluginQuota)
 
 		mgmt.GET("/debug", s.mgmt.GetDebug)
 		mgmt.PUT("/debug", s.mgmt.PutDebug)
@@ -77,6 +79,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/quota-exceeded/switch-preview-model", s.mgmt.PutSwitchPreviewModel)
 		mgmt.PATCH("/quota-exceeded/switch-preview-model", s.mgmt.PutSwitchPreviewModel)
 		mgmt.POST("/reset-quota", s.mgmt.ResetQuota)
+
+		mgmt.GET("/quota/providers", s.mgmt.GetQuotaProviders)
+		mgmt.POST("/quota/fetch", s.mgmt.FetchCredentialQuota)
+		mgmt.POST("/quota/reset", s.mgmt.ResetCredentialQuota)
 
 		mgmt.GET("/api-keys", s.mgmt.GetAPIKeys)
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
@@ -173,11 +179,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
 		mgmt.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
 		mgmt.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
+		mgmt.POST("/auth-files/refresh", s.mgmt.RefreshAuthFiles)
 		mgmt.POST("/vertex/import", s.mgmt.ImportVertexCredential)
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
-		mgmt.GET("/codex-device-auth", s.mgmt.RequestCodexDeviceToken)
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/xai-auth-url", s.mgmt.RequestXAIToken)
@@ -189,23 +195,6 @@ func (s *Server) registerManagementRoutes() {
 func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !s.managementAvailable(c) {
-			return
-		}
-		c.Next()
-	}
-}
-
-func (s *Server) accountUIAvailabilityMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if s == nil || s.cfg == nil || s.cfg.Home.Enabled || !s.cfg.RemoteManagement.AllowAccountUIWithoutAuth {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		// The account UI API carries no key, so it only accepts loopback callers
-		// or callers arriving through a configured trusted edge proxy. The edge
-		// proxy (for example, Cloudflare Access) remains the authentication boundary.
-		if c.Request == nil || !s.cfg.RemoteManagement.EdgePeerAllowed(c.Request.RemoteAddr) {
-			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		c.Next()
@@ -336,35 +325,5 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		}
 	}
 
-	c.File(filePath)
-}
-
-func (s *Server) serveCodexAccountsControlPanel(c *gin.Context) {
-	cfg := s.cfg
-	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	filePath := filepath.Join(managementasset.StaticDir(s.configFilePath), "accounts.html")
-	if _, err := os.Stat(filePath); err != nil {
-		if !os.IsNotExist(err) {
-			log.WithError(err).Error("failed to stat Codex accounts control panel asset")
-			c.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		// Docker images and other installs may not ship static/accounts.html
-		// on disk; fall back to the copy embedded in the binary so the panel
-		// (and GET /) works everywhere without extra volumes.
-		if len(forkstatic.AccountsHTML) == 0 {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		c.Header("Cache-Control", "no-store")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", forkstatic.AccountsHTML)
-		return
-	}
-
-	c.Header("Cache-Control", "no-store")
 	c.File(filePath)
 }

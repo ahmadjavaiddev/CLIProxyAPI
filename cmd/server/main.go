@@ -559,13 +559,6 @@ func main() {
 			}
 		}
 	}
-	// The account UI includes a Logs Viewer, so every deployment must keep a
-	// file-backed log stream available, including databases bootstrapped earlier
-	// with logging disabled.
-	if cfg != nil {
-		cfg.LoggingToFile = true
-	}
-
 	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)

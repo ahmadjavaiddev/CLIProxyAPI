@@ -41,15 +41,14 @@ type Handler struct {
 	cfg                     *config.Config
 	configFilePath          string
 	mu                      sync.Mutex
+	authStatusMu            sync.Mutex
 	reloadMu                sync.Mutex
 	reloadGeneration        uint64
 	appliedReloadGeneration uint64
 	attemptsMu              sync.Mutex
 	failedAttempts          map[string]*attemptInfo // keyed by client IP
-	vaultMu                 sync.Mutex
 	authManager             *coreauth.Manager
 	tokenStore              coreauth.Store
-	vaultStore              accountVaultBackend
 	localPassword           string
 	allowRemoteOverride     bool
 	envSecret               string
@@ -60,8 +59,8 @@ type Handler struct {
 	configReloadHook        func(context.Context, *config.Config)
 	pluginStoreRegistryURL  string
 	pluginStoreHTTPClient   pluginstore.HTTPDoer
-	pluginReleaseCacheMu    sync.Mutex
-	pluginReleaseCache      map[string]pluginReleaseCacheEntry
+	pluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
+	pluginReleases          pluginReleaseCache
 }
 
 type configReloadSnapshot struct {
@@ -272,13 +271,7 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		c.Header("X-CPA-SUPPORT-PLUGIN", pluginhost.SupportPluginHeaderValue())
 
 		clientIP := c.ClientIP()
-		// Gate remote access on the TCP peer, not on headers: callers through a
-		// configured trusted edge proxy count as local, everyone else needs
-		// allow-remote. The management secret key is always required.
 		localClient := clientIP == "127.0.0.1" || clientIP == "::1"
-		if h.cfg != nil && c.Request != nil {
-			localClient = h.cfg.RemoteManagement.EdgePeerAllowed(c.Request.RemoteAddr)
-		}
 
 		// Accept either Authorization: Bearer <key> or X-Management-Key
 		var provided string
