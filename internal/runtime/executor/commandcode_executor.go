@@ -47,6 +47,8 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 		if len(messages) > 0 { params["messages"] = messages }
 	}
 	for _, k := range []string{"messages", "system", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stop"} { if v, ok := input[k]; ok { params[k] = v } }
+	if tc, ok := params["tool_choice"].(string); ok { if tc == "none" { delete(params, "tool_choice") } else { params["tool_choice"] = map[string]any{"type": tc} } }
+	if tools, ok := params["tools"].([]any); ok { normalized := make([]any, 0, len(tools)); for _, raw := range tools { if tool, okTool := raw.(map[string]any); okTool { if fn, okFn := tool["function"].(map[string]any); okFn { normalized = append(normalized, map[string]any{"name": fn["name"], "description": fn["description"], "input_schema": fn["parameters"]}) } else { normalized = append(normalized, tool) } } }; params["tools"] = normalized }
 	if v, ok := input["reasoning_effort"].(string); ok { if clipped := commandcode.ResolveEffort(model, v); clipped != "" { params["reasoning_effort"] = clipped } }
 	if v, ok := input["model"].(string); ok && model == "" { params["model"] = commandcode.ResolveModel(v) }
 	data, _ := json.Marshal(body)
