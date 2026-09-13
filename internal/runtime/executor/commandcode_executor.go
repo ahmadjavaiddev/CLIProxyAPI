@@ -13,6 +13,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/client/commandcode"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	responses "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	"github.com/google/uuid"
@@ -51,7 +52,7 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	data, _ := json.Marshal(body)
 	resp, err := commandcode.Do(ctx, e.client, base, key, version, body["threadId"].(string), "", bytes.NewReader(data)); if err != nil { return nil, err }
 	out := make(chan cliproxyexecutor.StreamChunk, 8)
-	go func() { defer resp.Body.Close(); defer close(out); scanner := bufio.NewScanner(resp.Body); scanner.Buffer(make([]byte, 4096), 4<<20); id := "cc-response"; for scanner.Scan() { event, ok := commandcode.ParseLine(scanner.Text()); if !ok { continue }; var d map[string]any; _ = json.Unmarshal(event.Data, &d); var payload []byte; switch event.Type { case "text-delta": payload = ccChatChunk(id, req.Model, map[string]any{"content": stringValue(d["text"])}); case "reasoning-delta": payload = ccChatChunk(id, req.Model, map[string]any{"reasoning_content": stringValue(d["text"])}); case "finish": payload = ccChatChunk(id, req.Model, map[string]any{"finish_reason": "stop"}) }; if len(payload)>0 { select { case out <- cliproxyexecutor.StreamChunk{Payload: payload}: case <-ctx.Done(): return } } }; if err := scanner.Err(); err != nil { select { case out <- cliproxyexecutor.StreamChunk{Err: err}: case <-ctx.Done(): } } }()
+	go func() { defer resp.Body.Close(); defer close(out); scanner := bufio.NewScanner(resp.Body); scanner.Buffer(make([]byte, 4096), 4<<20); id := "cc-response"; var state any; for scanner.Scan() { event, ok := commandcode.ParseLine(scanner.Text()); if !ok { continue }; var d map[string]any; _ = json.Unmarshal(event.Data, &d); var payload []byte; switch event.Type { case "text-delta": payload = ccChatChunk(id, req.Model, map[string]any{"content": stringValue(d["text"])}); case "reasoning-delta": payload = ccChatChunk(id, req.Model, map[string]any{"reasoning_content": stringValue(d["text"])}); case "finish": payload = ccChatChunk(id, req.Model, map[string]any{"finish_reason": "stop"}) }; if len(payload)>0 { for _, translated := range responses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, req.Model, req.Payload, req.Payload, bytes.TrimSpace(payload), &state) { select { case out <- cliproxyexecutor.StreamChunk{Payload: translated}: case <-ctx.Done(): return } } } }; if err := scanner.Err(); err != nil { select { case out <- cliproxyexecutor.StreamChunk{Err: err}: case <-ctx.Done(): } } }()
 	return &cliproxyexecutor.StreamResult{Headers: resp.Header.Clone(), Chunks: out}, nil
 }
 
