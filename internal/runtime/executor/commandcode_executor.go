@@ -62,10 +62,20 @@ func codexInputToMessages(raw any) []map[string]any {
 	for _, item := range items {
 		m, ok := item.(map[string]any); if !ok { continue }
 		role, _ := m["role"].(string); if role == "" { role = "user" }
+		if role != "assistant" { role = "user" }
 		content := m["content"]
 		if content == nil { content = m["text"] }
 		if content == nil { continue }
-		out = append(out, map[string]any{"role": role, "content": content})
+		if parts, okParts := content.([]any); okParts {
+			texts := make([]string, 0, len(parts))
+			for _, part := range parts {
+				if p, okPart := part.(map[string]any); okPart {
+					if t, okText := p["text"].(string); okText { texts = append(texts, t) }
+				}
+			}
+			content = strings.Join(texts, "")
+		}
+		if text, okText := content.(string); okText && strings.TrimSpace(text) != "" { out = append(out, map[string]any{"role": role, "content": text}) }
 	}
 	return out
 }
