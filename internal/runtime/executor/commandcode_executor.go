@@ -39,7 +39,7 @@ func (e *CommandCodeExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	var input map[string]any
 	if err := json.Unmarshal(req.Payload, &input); err != nil { return nil, fmt.Errorf("commandcode: invalid request: %w", err) }
 	workingDir, _ := os.Getwd()
-	body := map[string]any{"config": map[string]any{"workingDir": workingDir, "environment": "linux-x64", "date": time.Now().UTC().Format("2006-01-02"), "structure": []any{}, "isGitRepo": false, "currentBranch": "", "mainBranch": "", "gitStatus": ""}, "memory":"", "taste":"", "skills":"", "permissionMode":"standard", "threadId": uuid.NewString(), "params": map[string]any{"model": model, "stream": true}}
+	body := map[string]any{"config": map[string]any{"workingDir": workingDir, "environment": "linux-x64", "date": time.Now().UTC().Format("2006-01-02"), "structure": []any{}, "isGitRepo": false, "currentBranch": "", "mainBranch": "", "gitStatus": "", "recentCommits": []any{}}, "memory":"", "taste":"", "skills":"", "permissionMode":"standard", "threadId": uuid.NewString(), "params": map[string]any{"model": model, "stream": true}}
 	params := body["params"].(map[string]any)
 	if raw, ok := input["input"]; ok {
 		messages := codexInputToMessages(raw)
